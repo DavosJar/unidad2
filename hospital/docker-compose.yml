@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:17-alpine
+    container_name: hospital-db
+    environment:
+      POSTGRES_DB: hospital_db
+      POSTGRES_USER: hospital_user
+      POSTGRES_PASSWORD: hospital_pass
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hospital_user -d hospital_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    image: maven:3.9-eclipse-temurin-21-alpine
+    container_name: hospital-app
+    working_dir: /app
+    volumes:
+      - ./:/app
+      - maven_cache:/root/.m2
+    command: mvn spring-boot:run
+    ports:
+      - "8080:8080"
+    environment:
+      DB_URL: jdbc:postgresql://db:5432/hospital_db
+      DB_USER: hospital_user
+      DB_PASSWORD: hospital_pass
+      SPRING_JPA_HIBERNATE_DDL_AUTO: update
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  maven_cache:

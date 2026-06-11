@@ -1,0 +1,24 @@
+# Maven
+target/
+*.jar
+*.war
+
+# IDE
+.idea/
+*.iml
+.classpath
+.project
+.settings/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker / Volumes
+postgres_data/
+
+# Maven wrapper jar (keep the scripts, not the jar)
+.mvn/wrapper/maven-wrapper.jar
+
+# Logs
+*.log
