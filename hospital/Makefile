@@ -14,3 +14,21 @@ run_dev:
 	-sudo fuser -k 5433/tcp 2>/dev/null || true
 	@echo "=> 🚀 Iniciando Base de datos y Aplicación ya buildeadas..."
 	sudo docker compose up
+
+republish:
+	@echo "=> 📦 Building imagen..."
+	docker build -t localhost:5000/hospital:latest .
+	@echo "=> 🔼 Pushing a registry local..."
+	docker push localhost:5000/hospital:latest
+	@echo "=> ✅ Imagen actualizada en registry"
+
+deploy:
+	@echo "=> 🗑️  Removiendo stack anterior..."
+	sudo docker stack rm hospital || true
+	@echo "⏳ Esperando que se elimine..."
+	sleep 5
+	@echo "=> 🚀 Deployando stack..."
+	sudo docker stack deploy -c stack.yml hospital
+	@echo "=> ⏳ Esperando que los nodos arranquen (60s)..."
+	sleep 60
+	@echo "=> ✅ Deploy completado"
