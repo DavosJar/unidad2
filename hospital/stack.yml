@@ -1,95 +1,33 @@
 version: '3.8'
-
 services:
-  hospital-1:
-    image: localhost:5000/hospital:latest
+  hospital:
+    image: 192.168.101.3:5000/hospital:latest
     ports:
       - mode: host
         target: 8080
-        published: 8081
+        published: 8080
         protocol: tcp
     environment:
-      - NODE_ID=node-1
-      - NODE_PEERS=http://hospital-2:8080,http://hospital-3:8080,http://hospital-4:8080,http://hospital-5:8080
       - DB_URL=jdbc:postgresql://db:5432/hospital_db
       - DB_USER=hospital_user
       - DB_PASSWORD=hospital_pass
+    deploy:
+      mode: global
     networks:
       - hospital-net
-
-  hospital-2:
-    image: localhost:5000/hospital:latest
-    ports:
-      - mode: host
-        target: 8080
-        published: 8082
-        protocol: tcp
-    environment:
-      - NODE_ID=node-2
-      - NODE_PEERS=http://hospital-1:8080,http://hospital-3:8080,http://hospital-4:8080,http://hospital-5:8080
-      - DB_URL=jdbc:postgresql://db:5432/hospital_db
-      - DB_USER=hospital_user
-      - DB_PASSWORD=hospital_pass
-    networks:
-      - hospital-net
-
-  hospital-3:
-    image: localhost:5000/hospital:latest
-    ports:
-      - mode: host
-        target: 8080
-        published: 8083
-        protocol: tcp
-    environment:
-      - NODE_ID=node-3
-      - NODE_PEERS=http://hospital-1:8080,http://hospital-2:8080,http://hospital-4:8080,http://hospital-5:8080
-      - DB_URL=jdbc:postgresql://db:5432/hospital_db
-      - DB_USER=hospital_user
-      - DB_PASSWORD=hospital_pass
-    networks:
-      - hospital-net
-
-  hospital-4:
-    image: localhost:5000/hospital:latest
-    ports:
-      - mode: host
-        target: 8080
-        published: 8084
-        protocol: tcp
-    environment:
-      - NODE_ID=node-4
-      - NODE_PEERS=http://hospital-1:8080,http://hospital-2:8080,http://hospital-3:8080,http://hospital-5:8080
-      - DB_URL=jdbc:postgresql://db:5432/hospital_db
-      - DB_USER=hospital_user
-      - DB_PASSWORD=hospital_pass
-    networks:
-      - hospital-net
-
-  hospital-5:
-    image: localhost:5000/hospital:latest
-    ports:
-      - mode: host
-        target: 8080
-        published: 8085
-        protocol: tcp
-    environment:
-      - NODE_ID=node-5
-      - NODE_PEERS=http://hospital-1:8080,http://hospital-2:8080,http://hospital-3:8080,http://hospital-4:8080
-      - DB_URL=jdbc:postgresql://db:5432/hospital_db
-      - DB_USER=hospital_user
-      - DB_PASSWORD=hospital_pass
-    networks:
-      - hospital-net
-
   db:
     image: postgres:17-alpine
     environment:
       - POSTGRES_DB=hospital_db
       - POSTGRES_USER=hospital_user
       - POSTGRES_PASSWORD=hospital_pass
+    deploy:
+      placement:
+        constraints:
+          - node.role == manager
     networks:
       - hospital-net
-
 networks:
   hospital-net:
     driver: overlay
+    attachable: true

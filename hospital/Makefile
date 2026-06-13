@@ -17,11 +17,11 @@ run_dev:
 
 republish:
 	@echo "=> 📦 Building imagen..."
-	docker build -t localhost:5000/hospital:latest .
+	docker build -t 192.168.101.3:5000/hospital:latest .
 	@echo "=> 🔼 Pushing a registry local..."
-	docker push localhost:5000/hospital:latest
+	docker push 192.168.101.3:5000/hospital:latest
 	@echo "=> ✅ Imagen actualizada en registry"
-
+	
 deploy:
 	@echo "=> 🗑️  Removiendo stack anterior..."
 	sudo docker stack rm hospital || true

@@ -2,8 +2,8 @@
 <configuration>
     <!-- Properties -->
     <property name="LOG_FILE" value="hospital.log"/>
-    <property name="LOG_PATTERN" value="[%d{HH:mm:ss}] [%-5level] [%logger{36}] - %msg%n"/>
-    <property name="LOG_DIR" value="."/>
+    <property name="LOG_PATTERN" value="[%d{HH:mm:ss}] %msg%n"/>
+    <property name="LOG_DIR" value="/app"/>
     <property name="CHARSET" value="UTF-8"/>
     
     <!-- FILE Appender with Rolling Policy -->
@@ -45,7 +45,7 @@
     <logger name="org.apache.coyote" level="WARN"/>
     
     <!-- Application Loggers -->
-    <logger name="com.gruposiete.hospital" level="DEBUG"/>
+    <logger name="com.gruposiete.hospital" level="INFO"/>
     
     <!-- Root Logger -->
     <root level="WARN">

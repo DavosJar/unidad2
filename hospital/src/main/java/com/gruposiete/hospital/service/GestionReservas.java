@@ -26,29 +26,25 @@ public class GestionReservas {
     public Reserva registrarReserva(Long idDonante, String nombrePaciente) {
         Reserva reserva = new Reserva(idDonante, nombrePaciente, LocalDateTime.now());
         Reserva reservaGuardada = repositorioReservas.save(reserva);
-        logger.info("Nodo {}: POST /api/reservas - Reserva creada (ID: {}, Donante: {}, Paciente: {})", 
-            nodeIdentity.getNodeId(), reservaGuardada.getId(), idDonante, nombrePaciente);
+        logger.info("Nodo {}: Registró una nueva reserva", nodeIdentity.getNodeId());
         return reservaGuardada;
     }
 
     public List<Reserva> listarReservas() {
         List<Reserva> reservas = repositorioReservas.findAll();
-        logger.info("Nodo {}: GET /api/reservas - {} reservas encontradas", 
-            nodeIdentity.getNodeId(), reservas.size());
+        logger.info("Nodo {}: Listó todas las reservas", nodeIdentity.getNodeId());
         return reservas;
     }
 
     public List<Reserva> listarReservasPorDonante(Long idDonante) {
         List<Reserva> resultado = repositorioReservas.findByidDonante(idDonante);
-        logger.info("Nodo {}: GET /api/reservas/donante/{} - {} reservas encontradas", 
-            nodeIdentity.getNodeId(), idDonante, resultado.size());
+        logger.info("Nodo {}: Listó reservas por donante", nodeIdentity.getNodeId());
         return resultado;
     }
 
     public long contarReservasPorDonante(Long idDonante) {
         long cantidad = repositorioReservas.countByidDonante(idDonante);
-        logger.info("Nodo {}: GET /api/reservas/donante/{}/count - {} reservas", 
-            nodeIdentity.getNodeId(), idDonante, cantidad);
+        logger.info("Nodo {}: Contó reservas de un donante", nodeIdentity.getNodeId());
         return cantidad;
     }
 }
