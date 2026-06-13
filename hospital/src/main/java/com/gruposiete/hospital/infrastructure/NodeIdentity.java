@@ -69,7 +69,6 @@ public class NodeIdentity {
         return nodeId;
     }
 
-<<<<<<< HEAD
     public int getNumericId() {
         return numericId;
     }
