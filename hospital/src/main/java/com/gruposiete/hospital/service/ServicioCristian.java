@@ -3,10 +3,12 @@ package com.gruposiete.hospital.service;
 import com.gruposiete.hospital.infrastructure.EstadoCluster;
 import com.gruposiete.hospital.model.MensajeCluster;
 import com.gruposiete.hospital.model.MensajeCluster.TipoMensaje;
+import com.gruposiete.hospital.service.GestionLogs;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.CommandLineRunner;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import java.util.Optional;
 
@@ -22,9 +24,11 @@ public class ServicioCristian implements CommandLineRunner {
     private int clusterPort;
 
     private final EstadoCluster estadoCluster;
+    private final GestionLogs gestionLogs;
 
-    public ServicioCristian(EstadoCluster estadoCluster) {
+    public ServicioCristian(EstadoCluster estadoCluster, @Lazy GestionLogs gestionLogs) {
         this.estadoCluster = estadoCluster;
+        this.gestionLogs = gestionLogs;
     }
 
     @Override
@@ -35,6 +39,11 @@ public class ServicioCristian implements CommandLineRunner {
         if (estadoCluster.getIdPropio() == timeServerId) {
             estadoCluster.ajustarOffsetReloj(0L);
             log.info("Nodo {} es el servidor de tiempo, offset=0", timeServerId);
+            try {
+                gestionLogs.registrar("Nodo " + timeServerId + " es el servidor de tiempo, offset=0");
+            } catch (Exception e) {
+                log.warn("No se pudo persistir log: {}", e.getMessage());
+            }
             return;
         }
         String serverHost = estadoCluster.getPeers().get(timeServerId);
@@ -57,6 +66,11 @@ public class ServicioCristian implements CommandLineRunner {
                     long offset = tServidor + (rtt / 2) - t2;
                     estadoCluster.ajustarOffsetReloj(offset);
                     log.info("Cristian sincronizado: offset={}ms, RTT={}ms", offset, rtt);
+                    try {
+                        gestionLogs.registrar("Tiempo sincronizado con nodo " + timeServerId + ": offset=" + offset + "ms, RTT=" + rtt + "ms");
+                    } catch (Exception e) {
+                        log.warn("No se pudo persistir log: {}", e.getMessage());
+                    }
                     return;
                 }
                 reintentos++;
@@ -70,6 +84,11 @@ public class ServicioCristian implements CommandLineRunner {
             }
         }
         log.warn("No se pudo sincronizar tiempo después de {} intentos", maxReintentos);
+        try {
+            gestionLogs.registrar("Sincronizacion de tiempo fallo tras " + maxReintentos + " intentos con nodo " + timeServerId);
+        } catch (Exception e) {
+            log.warn("No se pudo persistir log: {}", e.getMessage());
+        }
     }
 
     public Optional<MensajeCluster> procesarTimeRequest(MensajeCluster msg) {

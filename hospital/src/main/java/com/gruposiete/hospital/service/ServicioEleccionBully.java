@@ -4,11 +4,13 @@ import com.gruposiete.hospital.infrastructure.EstadoCluster;
 import com.gruposiete.hospital.infrastructure.EstadoCluster.EstadoNodo;
 import com.gruposiete.hospital.model.MensajeCluster;
 import com.gruposiete.hospital.model.MensajeCluster.TipoMensaje;
+import com.gruposiete.hospital.service.GestionLogs;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -27,13 +29,15 @@ public class ServicioEleccionBully {
     private int clusterPort;
 
     private final EstadoCluster estadoCluster;
+    private final GestionLogs gestionLogs;
     private ScheduledExecutorService scheduler;
     private volatile long ultimoHeartbeatRecibido;
     private volatile long inicioEleccion = 0;
     private volatile boolean esperandoOk = false;
 
-    public ServicioEleccionBully(EstadoCluster estadoCluster) {
+    public ServicioEleccionBully(EstadoCluster estadoCluster, @Lazy GestionLogs gestionLogs) {
         this.estadoCluster = estadoCluster;
+        this.gestionLogs = gestionLogs;
     }
 
     @PostConstruct
@@ -89,13 +93,19 @@ public class ServicioEleccionBully {
     }
 
     private synchronized void iniciarEleccion() {
+        int idPropio = estadoCluster.getIdPropio();
         int coordViejo = estadoCluster.getCoordinadorActual();
-        if (coordViejo != -1 && coordViejo != estadoCluster.getIdPropio()) {
+        if (coordViejo != -1 && coordViejo != idPropio) {
             estadoCluster.removerNodo(coordViejo);
+            try {
+                gestionLogs.registrar("Nodo " + idPropio + " detecto caida de coordinador " + coordViejo + ", inicia eleccion");
+            } catch (Exception e) {
+                log.warn("No se pudo persistir log: {}", e.getMessage());
+            }
         }
         estadoCluster.marcarCoordinador(-1);
         estadoCluster.setEstado(EstadoNodo.EN_ELECCION);
-        List<Integer> mayores = estadoCluster.nodosConIdMayor(estadoCluster.getIdPropio());
+        List<Integer> mayores = estadoCluster.nodosConIdMayor(idPropio);
         if (mayores.isEmpty()) {
             proclamarseCoordinador();
             return;
@@ -107,7 +117,7 @@ public class ServicioEleccionBully {
             if (host == null) continue;
             try {
                 MensajeCluster msg = new MensajeCluster(
-                    TipoMensaje.ELECTION, estadoCluster.getIdPropio(), idMayor, "");
+                    TipoMensaje.ELECTION, idPropio, idMayor, "");
                 MensajeCluster.enviarSinRespuesta(msg, host, clusterPort, 1000);
                 esperandoOk = true;
             } catch (IOException e) {
@@ -159,6 +169,11 @@ public class ServicioEleccionBully {
             estadoCluster.limpiarNodoCongeladoReportante();
         }
         log.info("Nodo {} es el nuevo coordinador", idPropio);
+        try {
+            gestionLogs.registrar("Nodo " + idPropio + " es el nuevo coordinador");
+        } catch (Exception e) {
+            log.warn("No se pudo persistir log: {}", e.getMessage());
+        }
     }
 
     public synchronized void procesarMensaje(MensajeCluster msg) {
@@ -232,6 +247,7 @@ public class ServicioEleccionBully {
     }
 
     private void procesarCoordinator(MensajeCluster msg) {
+        int idPropio = estadoCluster.getIdPropio();
         estadoCluster.marcarCoordinador(msg.getOrigen());
         String payload = msg.getPayload();
         if (payload != null && payload.startsWith("orden_anillo=")) {
@@ -240,7 +256,12 @@ public class ServicioEleccionBully {
                 estadoCluster.configurarAnillo(orden);
             }
         }
-        log.info("Nodo {} reconoce coordinador {}", estadoCluster.getIdPropio(), msg.getOrigen());
+        log.info("Nodo {} reconoce coordinador {}", idPropio, msg.getOrigen());
+        try {
+            gestionLogs.registrar("Nodo " + idPropio + " reconoce coordinador nodo " + msg.getOrigen());
+        } catch (Exception e) {
+            log.warn("No se pudo persistir log: {}", e.getMessage());
+        }
     }
 
     private void procesarRingUpdate(MensajeCluster msg) {
@@ -317,6 +338,11 @@ public class ServicioEleccionBully {
             }
         }
         log.warn("Nodo {} confirmado caido por TOKEN_LOST", nodoSospechoso);
+        try {
+            gestionLogs.registrar("Nodo " + nodoSospechoso + " confirmado caido por TOKEN_LOST");
+        } catch (Exception e) {
+            log.warn("No se pudo persistir log: {}", e.getMessage());
+        }
         estadoCluster.removerNodo(nodoSospechoso);
         List<Integer> vivos = new ArrayList<>(estadoCluster.getPeers().keySet());
         Collections.sort(vivos);
