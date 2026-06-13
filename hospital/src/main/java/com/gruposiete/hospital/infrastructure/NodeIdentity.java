@@ -69,8 +69,13 @@ public class NodeIdentity {
         return nodeId;
     }
 
+<<<<<<< HEAD
     public int getNumericId() {
         return numericId;
+    }
+
+    public int getNodeIdAsInt() {
+        return Integer.parseInt(nodeId);
     }
 
     @Override

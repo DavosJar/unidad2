@@ -1,0 +1,365 @@
+package com.gruposiete.hospital.service;
+
+import com.gruposiete.hospital.infrastructure.EstadoCluster;
+import com.gruposiete.hospital.infrastructure.EstadoCluster.EstadoNodo;
+import com.gruposiete.hospital.model.MensajeCluster;
+import com.gruposiete.hospital.model.MensajeCluster.TipoMensaje;
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+
+@Service
+public class ServicioEleccionBully {
+
+    private static final Logger log = LoggerFactory.getLogger(ServicioEleccionBully.class);
+
+    @Value("${cluster.port:9000}")
+    private int clusterPort;
+
+    private final EstadoCluster estadoCluster;
+    private ScheduledExecutorService scheduler;
+    private volatile long ultimoHeartbeatRecibido;
+    private volatile long inicioEleccion = 0;
+    private volatile boolean esperandoOk = false;
+
+    public ServicioEleccionBully(EstadoCluster estadoCluster) {
+        this.estadoCluster = estadoCluster;
+    }
+
+    @PostConstruct
+    public void iniciar() {
+        this.ultimoHeartbeatRecibido = System.currentTimeMillis();
+        scheduler = Executors.newSingleThreadScheduledExecutor();
+        scheduler.scheduleAtFixedRate(this::cicloHeartbeat, 5000, 2000, TimeUnit.MILLISECONDS);
+        scheduler.scheduleAtFixedRate(this::verificarHeartbeats, 5000, 2000, TimeUnit.MILLISECONDS);
+    }
+
+    @PreDestroy
+    public void detener() {
+        if (scheduler != null) {
+            scheduler.shutdown();
+        }
+    }
+
+    private void cicloHeartbeat() {
+        if (!estadoCluster.estaInicializado()) return;
+        int idPropio = estadoCluster.getIdPropio();
+        int coord = estadoCluster.getCoordinadorActual();
+        if (idPropio == coord) return;
+        String host = estadoCluster.getPeers().get(coord);
+        if (host == null) return;
+        try {
+            MensajeCluster msg = new MensajeCluster(
+                TipoMensaje.HEARTBEAT, idPropio, coord, "");
+            MensajeCluster.enviarSinRespuesta(msg, host, clusterPort, 1000);
+        } catch (IOException e) {
+            log.debug("Heartbeat a {} fallo: {}", coord, e.getMessage());
+        }
+    }
+
+    private void verificarHeartbeats() {
+        if (!estadoCluster.estaInicializado()) return;
+        int idPropio = estadoCluster.getIdPropio();
+        int coord = estadoCluster.getCoordinadorActual();
+        if (idPropio == coord) {
+            ultimoHeartbeatRecibido = System.currentTimeMillis();
+            return;
+        }
+        long diff = System.currentTimeMillis() - ultimoHeartbeatRecibido;
+        if (diff > 6000 && estadoCluster.getEstado() != EstadoNodo.EN_ELECCION) {
+            log.warn("Nodo {} detecta caida del coordinador {}", idPropio, coord);
+            iniciarEleccion();
+        }
+        if (estadoCluster.getEstado() == EstadoNodo.EN_ELECCION && esperandoOk) {
+            if (System.currentTimeMillis() - inicioEleccion > 3000) {
+                log.info("Timeout esperando OK, auto-proclamando nodo {}", idPropio);
+                proclamarseCoordinador();
+            }
+        }
+    }
+
+    private synchronized void iniciarEleccion() {
+        int coordViejo = estadoCluster.getCoordinadorActual();
+        if (coordViejo != -1 && coordViejo != estadoCluster.getIdPropio()) {
+            estadoCluster.removerNodo(coordViejo);
+        }
+        estadoCluster.marcarCoordinador(-1);
+        estadoCluster.setEstado(EstadoNodo.EN_ELECCION);
+        List<Integer> mayores = estadoCluster.nodosConIdMayor(estadoCluster.getIdPropio());
+        if (mayores.isEmpty()) {
+            proclamarseCoordinador();
+            return;
+        }
+        inicioEleccion = System.currentTimeMillis();
+        esperandoOk = false;
+        for (int idMayor : mayores) {
+            String host = estadoCluster.getPeers().get(idMayor);
+            if (host == null) continue;
+            try {
+                MensajeCluster msg = new MensajeCluster(
+                    TipoMensaje.ELECTION, estadoCluster.getIdPropio(), idMayor, "");
+                MensajeCluster.enviarSinRespuesta(msg, host, clusterPort, 1000);
+                esperandoOk = true;
+            } catch (IOException e) {
+                log.debug("Nodo {} no responde a ELECTION: {}", idMayor, e.getMessage());
+            }
+        }
+        if (!esperandoOk) {
+            proclamarseCoordinador();
+        }
+    }
+
+    private void proclamarseCoordinador() {
+        int idPropio = estadoCluster.getIdPropio();
+        estadoCluster.marcarCoordinador(idPropio);
+        List<Integer> vivos = new ArrayList<>(estadoCluster.getPeers().keySet());
+        Collections.sort(vivos);
+        StringBuilder ordenPayload = new StringBuilder("orden_anillo=");
+        for (int i = 0; i < vivos.size(); i++) {
+            if (i > 0) ordenPayload.append(",");
+            ordenPayload.append(vivos.get(i));
+        }
+        estadoCluster.configurarAnillo(vivos);
+        for (int idDest : vivos) {
+            if (idDest == idPropio) continue;
+            String host = estadoCluster.getPeers().get(idDest);
+            if (host == null) continue;
+            try {
+                MensajeCluster msg = new MensajeCluster(
+                    TipoMensaje.COORDINATOR, idPropio, idDest, ordenPayload.toString());
+                MensajeCluster.enviarSinRespuesta(msg, host, clusterPort, 1000);
+            } catch (IOException e) {
+                log.debug("Error enviando COORDINATOR a {}: {}", idDest, e.getMessage());
+            }
+        }
+        Integer congelado = estadoCluster.getNodoCongeladoReportante();
+        if (congelado != null) {
+            String host = estadoCluster.getPeers().get(congelado);
+            if (host != null) {
+                int nuevoSiguiente = calcularSiguiente(vivos, congelado);
+                try {
+                    MensajeCluster msg = new MensajeCluster(
+                        TipoMensaje.TOKEN_RESEND, idPropio, congelado,
+                        "destino=" + nuevoSiguiente);
+                    MensajeCluster.enviarSinRespuesta(msg, host, clusterPort, 1000);
+                } catch (IOException e) {
+                    log.debug("Error enviando TOKEN_RESEND a {}: {}", congelado, e.getMessage());
+                }
+            }
+            estadoCluster.limpiarNodoCongeladoReportante();
+        }
+        log.info("Nodo {} es el nuevo coordinador", idPropio);
+    }
+
+    public synchronized void procesarMensaje(MensajeCluster msg) {
+        switch (msg.getTipo()) {
+            case HEARTBEAT:
+                procesarHeartbeat(msg);
+                break;
+            case HEARTBEAT_OK:
+                procesarHeartbeatOk(msg);
+                break;
+            case ELECTION:
+                procesarElection(msg);
+                break;
+            case OK:
+                procesarOk(msg);
+                break;
+            case COORDINATOR:
+                procesarCoordinator(msg);
+                break;
+            case RING_UPDATE:
+                procesarRingUpdate(msg);
+                break;
+            case TOKEN_LOST:
+                procesarTokenLost(msg);
+                break;
+        }
+    }
+
+    private void procesarHeartbeat(MensajeCluster msg) {
+        if (estadoCluster.getIdPropio() != estadoCluster.getCoordinadorActual()) return;
+        try {
+            MensajeCluster respuesta = new MensajeCluster(
+                TipoMensaje.HEARTBEAT_OK, estadoCluster.getIdPropio(), msg.getOrigen(), "");
+            String host = estadoCluster.getPeers().get(msg.getOrigen());
+            if (host != null) {
+                MensajeCluster.enviarSinRespuesta(respuesta, host, clusterPort, 1000);
+            }
+        } catch (IOException e) {
+            log.debug("Error enviando HEARTBEAT_OK a {}: {}", msg.getOrigen(), e.getMessage());
+        }
+    }
+
+    private void procesarHeartbeatOk(MensajeCluster msg) {
+        ultimoHeartbeatRecibido = System.currentTimeMillis();
+    }
+
+    private void procesarElection(MensajeCluster msg) {
+        try {
+            MensajeCluster ok = new MensajeCluster(
+                TipoMensaje.OK, estadoCluster.getIdPropio(), msg.getOrigen(), "");
+            String host = estadoCluster.getPeers().get(msg.getOrigen());
+            if (host != null) {
+                MensajeCluster.enviarSinRespuesta(ok, host, clusterPort, 1000);
+            }
+        } catch (IOException e) {
+            log.debug("Error enviando OK a {}: {}", msg.getOrigen(), e.getMessage());
+        }
+        if (msg.getOrigen() < estadoCluster.getIdPropio()
+                && estadoCluster.getEstado() != EstadoNodo.EN_ELECCION) {
+            log.info("Nodo {} inicia eleccion por ELECTION de {}", estadoCluster.getIdPropio(), msg.getOrigen());
+            iniciarEleccion();
+        }
+    }
+
+    private void procesarOk(MensajeCluster msg) {
+        if (estadoCluster.getEstado() == EstadoNodo.EN_ELECCION) {
+            log.info("Nodo {} recibio OK de {}, detiene eleccion", estadoCluster.getIdPropio(), msg.getOrigen());
+            esperandoOk = false;
+            estadoCluster.setEstado(EstadoNodo.NORMAL);
+        }
+    }
+
+    private void procesarCoordinator(MensajeCluster msg) {
+        estadoCluster.marcarCoordinador(msg.getOrigen());
+        String payload = msg.getPayload();
+        if (payload != null && payload.startsWith("orden_anillo=")) {
+            List<Integer> orden = parsearOrden(payload.substring("orden_anillo=".length()));
+            if (!orden.isEmpty()) {
+                estadoCluster.configurarAnillo(orden);
+            }
+        }
+        log.info("Nodo {} reconoce coordinador {}", estadoCluster.getIdPropio(), msg.getOrigen());
+    }
+
+    private void procesarRingUpdate(MensajeCluster msg) {
+        String payload = msg.getPayload();
+        if (payload != null && payload.startsWith("orden_anillo=")) {
+            List<Integer> orden = parsearOrden(payload.substring("orden_anillo=".length()));
+            if (!orden.isEmpty()) {
+                estadoCluster.configurarAnillo(orden);
+                log.info("Nodo {} actualiza anillo: {}", estadoCluster.getIdPropio(), orden);
+            }
+        }
+    }
+
+    private List<Integer> parsearOrden(String csv) {
+        List<Integer> orden = new ArrayList<>();
+        for (String s : csv.split(",")) {
+            try {
+                orden.add(Integer.parseInt(s.trim()));
+            } catch (NumberFormatException e) {
+                log.warn("Formato invalido en orden anillo: {}", s);
+            }
+        }
+        return orden;
+    }
+
+    private void procesarTokenLost(MensajeCluster msg) {
+        int idPropio = estadoCluster.getIdPropio();
+        if (idPropio != estadoCluster.getCoordinadorActual()) return;
+        String payload = msg.getPayload();
+        int nodoSospechoso = -1;
+        if (payload != null && payload.startsWith("nodo_sospechoso=")) {
+            try {
+                nodoSospechoso = Integer.parseInt(payload.substring("nodo_sospechoso=".length()));
+            } catch (NumberFormatException e) {
+                return;
+            }
+        }
+        if (nodoSospechoso == -1) {
+            List<Integer> vivos = new ArrayList<>(estadoCluster.getPeers().keySet());
+            Collections.sort(vivos);
+            int siguienteDeReportante = calcularSiguiente(vivos, msg.getOrigen());
+            String hostReporter = estadoCluster.getPeers().get(msg.getOrigen());
+            if (hostReporter != null) {
+                try {
+                    MensajeCluster resend = new MensajeCluster(
+                        TipoMensaje.TOKEN_RESEND, idPropio, msg.getOrigen(),
+                        "destino=" + siguienteDeReportante);
+                    MensajeCluster.enviarSinRespuesta(resend, hostReporter, clusterPort, 1000);
+                } catch (IOException e) {
+                    log.debug("Error en TOKEN_RESEND resync a {}: {}", msg.getOrigen(), e.getMessage());
+                }
+            }
+            return;
+        }
+        String hostSospechoso = estadoCluster.getPeers().get(nodoSospechoso);
+        if (hostSospechoso != null) {
+            try {
+                MensajeCluster heartbeatCheck = new MensajeCluster(
+                    TipoMensaje.HEARTBEAT, idPropio, nodoSospechoso, "");
+                MensajeCluster.RespuestaEnvio res = MensajeCluster.enviar(heartbeatCheck, hostSospechoso, clusterPort, 1000, 1);
+                if (res.fueExitoso()) {
+                    log.info("TOKEN_LOST falso positivo, nodo {} esta vivo", nodoSospechoso);
+                    String hostReporter = estadoCluster.getPeers().get(msg.getOrigen());
+                    if (hostReporter != null) {
+                        MensajeCluster retry = new MensajeCluster(
+                            TipoMensaje.TOKEN_RETRY, idPropio, msg.getOrigen(),
+                            "destino=" + nodoSospechoso);
+                        MensajeCluster.enviarSinRespuesta(retry, hostReporter, clusterPort, 1000);
+                    }
+                    return;
+                }
+            } catch (IOException e) {
+                log.debug("Heartbeat a nodo sospechoso {} fallo: {}", nodoSospechoso, e.getMessage());
+            }
+        }
+        log.warn("Nodo {} confirmado caido por TOKEN_LOST", nodoSospechoso);
+        estadoCluster.removerNodo(nodoSospechoso);
+        List<Integer> vivos = new ArrayList<>(estadoCluster.getPeers().keySet());
+        Collections.sort(vivos);
+        StringBuilder ordenPayload = new StringBuilder("orden_anillo=");
+        for (int i = 0; i < vivos.size(); i++) {
+            if (i > 0) ordenPayload.append(",");
+            ordenPayload.append(vivos.get(i));
+        }
+        estadoCluster.configurarAnillo(vivos);
+        for (int idDest : vivos) {
+            if (idDest == idPropio) continue;
+            String host = estadoCluster.getPeers().get(idDest);
+            if (host == null) continue;
+            try {
+                MensajeCluster update = new MensajeCluster(
+                    TipoMensaje.RING_UPDATE, idPropio, idDest, ordenPayload.toString());
+                MensajeCluster.enviarSinRespuesta(update, host, clusterPort, 1000);
+            } catch (IOException e) {
+                log.debug("Error enviando RING_UPDATE a {}: {}", idDest, e.getMessage());
+            }
+        }
+        String hostReporter = estadoCluster.getPeers().get(msg.getOrigen());
+        if (hostReporter != null) {
+            int nuevoSiguiente = calcularSiguiente(vivos, msg.getOrigen());
+            try {
+                MensajeCluster resend = new MensajeCluster(
+                    TipoMensaje.TOKEN_RESEND, idPropio, msg.getOrigen(),
+                    "destino=" + nuevoSiguiente);
+                MensajeCluster.enviarSinRespuesta(resend, hostReporter, clusterPort, 1000);
+            } catch (IOException e) {
+                log.debug("Error enviando TOKEN_RESEND a {}: {}", msg.getOrigen(), e.getMessage());
+            }
+        }
+    }
+
+    private int calcularSiguiente(List<Integer> orden, int idNodo) {
+        for (int i = 0; i < orden.size(); i++) {
+            if (orden.get(i) == idNodo) {
+                return orden.get((i + 1) % orden.size());
+            }
+        }
+        return orden.isEmpty() ? -1 : orden.get(0);
+    }
+
+    public long getUltimoHeartbeatRecibido() { return ultimoHeartbeatRecibido; }
+}

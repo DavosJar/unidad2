@@ -18,25 +18,86 @@ services:
       timeout: 5s
       retries: 5
 
-  app:
-    image: maven:3.9-eclipse-temurin-21-alpine
-    container_name: hospital-app
-    working_dir: /app
-    volumes:
-      - ./:/app
-      - maven_cache:/root/.m2
-    command: mvn spring-boot:run
+  app-node1:
+    build: .
+    image: hospital-cluster:latest
+    container_name: hospital-app-1
     ports:
-      - "8080:8080"
+      - "8081:8080"
     environment:
       DB_URL: jdbc:postgresql://db:5432/hospital_db
       DB_USER: hospital_user
       DB_PASSWORD: hospital_pass
-      SPRING_JPA_HIBERNATE_DDL_AUTO: update
+      SPRING_JPA_HIBERNATE_DDL_AUTO: none
+      NODE_ID: 1
+      CLUSTER_PEERS: app-node1,app-node2,app-node3,app-node4,app-node5
+    depends_on:
+      db:
+        condition: service_healthy
+
+  app-node2:
+    image: hospital-cluster:latest
+    container_name: hospital-app-2
+    ports:
+      - "8082:8080"
+    environment:
+      DB_URL: jdbc:postgresql://db:5432/hospital_db
+      DB_USER: hospital_user
+      DB_PASSWORD: hospital_pass
+      SPRING_JPA_HIBERNATE_DDL_AUTO: none
+      NODE_ID: 2
+      CLUSTER_PEERS: app-node1,app-node2,app-node3,app-node4,app-node5
+    depends_on:
+      db:
+        condition: service_healthy
+
+  app-node3:
+    image: hospital-cluster:latest
+    container_name: hospital-app-3
+    ports:
+      - "8083:8080"
+    environment:
+      DB_URL: jdbc:postgresql://db:5432/hospital_db
+      DB_USER: hospital_user
+      DB_PASSWORD: hospital_pass
+      SPRING_JPA_HIBERNATE_DDL_AUTO: none
+      NODE_ID: 3
+      CLUSTER_PEERS: app-node1,app-node2,app-node3,app-node4,app-node5
+    depends_on:
+      db:
+        condition: service_healthy
+
+  app-node4:
+    image: hospital-cluster:latest
+    container_name: hospital-app-4
+    ports:
+      - "8084:8080"
+    environment:
+      DB_URL: jdbc:postgresql://db:5432/hospital_db
+      DB_USER: hospital_user
+      DB_PASSWORD: hospital_pass
+      SPRING_JPA_HIBERNATE_DDL_AUTO: none
+      NODE_ID: 4
+      CLUSTER_PEERS: app-node1,app-node2,app-node3,app-node4,app-node5
+    depends_on:
+      db:
+        condition: service_healthy
+
+  app-node5:
+    image: hospital-cluster:latest
+    container_name: hospital-app-5
+    ports:
+      - "8085:8080"
+    environment:
+      DB_URL: jdbc:postgresql://db:5432/hospital_db
+      DB_USER: hospital_user
+      DB_PASSWORD: hospital_pass
+      SPRING_JPA_HIBERNATE_DDL_AUTO: none
+      NODE_ID: 5
+      CLUSTER_PEERS: app-node1,app-node2,app-node3,app-node4,app-node5
     depends_on:
       db:
         condition: service_healthy
 
 volumes:
   postgres_data:
-  maven_cache:
