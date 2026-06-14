@@ -3,11 +3,13 @@ package com.gruposiete.hospital.service;
 import com.gruposiete.hospital.infrastructure.EstadoCluster;
 import com.gruposiete.hospital.model.MensajeCluster;
 import com.gruposiete.hospital.model.MensajeCluster.TipoMensaje;
+import com.gruposiete.hospital.service.GestionLogs;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import java.io.IOException;
 import java.util.Optional;
@@ -24,12 +26,15 @@ public class ServicioAnilloToken {
     private int clusterPort;
 
     private final EstadoCluster estadoCluster;
+    private final GestionLogs gestionLogs;
     private ScheduledExecutorService scheduler;
     private volatile long timestampTokenRecibido = 0;
     private volatile long timestampFrozen = 0;
+    private volatile long ultimoLogToken = 0;
 
-    public ServicioAnilloToken(EstadoCluster estadoCluster) {
+    public ServicioAnilloToken(EstadoCluster estadoCluster, @Lazy GestionLogs gestionLogs) {
         this.estadoCluster = estadoCluster;
+        this.gestionLogs = gestionLogs;
     }
 
     @PostConstruct
@@ -62,6 +67,15 @@ public class ServicioAnilloToken {
             if (res.fueExitoso()) {
                 estadoCluster.quitarToken();
                 log.debug("Token pasado a nodo {}", destino);
+                if (System.currentTimeMillis() - ultimoLogToken > 10000) {
+                    ultimoLogToken = System.currentTimeMillis();
+                    log.info("Token circulando: nodo {} → nodo {}", estadoCluster.getIdPropio(), destino);
+                    try {
+                        gestionLogs.registrar("Token circulando: nodo " + estadoCluster.getIdPropio() + " → nodo " + destino);
+                    } catch (Exception e) {
+                        log.warn("No se pudo persistir log: {}", e.getMessage());
+                    }
+                }
             } else {
                 manejarFalloToken(destino);
             }

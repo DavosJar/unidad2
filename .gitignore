@@ -22,3 +22,7 @@ postgres_data/
 
 # Logs
 *.log
+
+#frontend
+frontend/node_modules
+frontend/dist
