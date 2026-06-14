@@ -1,0 +1,99 @@
+.skeleton {
+  background: var(--bg-hover);
+  background-image: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0,
+    rgba(255, 255, 255, 0.4) 20%,
+    rgba(255, 255, 255, 0.4) 60%,
+    rgba(255, 255, 255, 0)
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite linear;
+  border-radius: var(--radius-sm);
+}
+
+.skeleton--circle {
+  border-radius: var(--radius-full);
+  width: 40px;
+  height: 40px;
+}
+
+.skeleton--circle.skeleton--sm {
+  width: 32px;
+  height: 32px;
+}
+
+.skeleton--circle.skeleton--lg {
+  width: 48px;
+  height: 48px;
+}
+
+.skeleton--text {
+  height: 12px;
+  border-radius: var(--radius-full);
+}
+
+.skeleton--text.skeleton--header {
+  height: 20px;
+  margin-bottom: 16px;
+}
+
+.skeleton--w-15 { width: 15%; }
+.skeleton--w-20 { width: 20%; }
+.skeleton--w-25 { width: 25%; }
+.skeleton--w-30 { width: 30%; }
+.skeleton--w-40 { width: 40%; }
+.skeleton--w-60 { width: 60%; }
+.skeleton--w-80 { width: 80%; }
+.skeleton--w-100 { width: 100%; }
+
+.skeleton-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 1.25rem;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+}
+
+.skeleton-card__lines {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.skeleton-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.skeleton-table {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  padding: 1.5rem;
+  box-shadow: var(--shadow-md);
+}
+
+.skeleton-stat {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-xl);
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  box-shadow: var(--shadow-md);
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
