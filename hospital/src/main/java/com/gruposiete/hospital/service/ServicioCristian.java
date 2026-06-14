@@ -62,7 +62,7 @@ public class ServicioCristian implements CommandLineRunner {
             return;
         }
         int reintentos = 0;
-        int maxReintentos = 10;
+        int maxReintentos = 3;
         while (reintentos < maxReintentos) {
             try {
                 long t1 = System.currentTimeMillis();
@@ -90,7 +90,7 @@ public class ServicioCristian implements CommandLineRunner {
                 log.warn("Intento {} de {} fallo: {}", reintentos, maxReintentos, e.getMessage());
             }
             if (reintentos < maxReintentos) {
-                Thread.sleep(2000);
+                Thread.sleep(1000);
             }
         }
         log.warn("No se pudo sincronizar tiempo después de {} intentos", maxReintentos);

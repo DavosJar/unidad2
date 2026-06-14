@@ -250,6 +250,7 @@ public class ServicioEleccionBully {
     private void procesarCoordinator(MensajeCluster msg) {
         int idPropio = estadoCluster.getIdPropio();
         estadoCluster.marcarCoordinador(msg.getOrigen());
+        ultimoHeartbeatRecibido = System.currentTimeMillis();
         String payload = msg.getPayload();
         if (payload != null && payload.startsWith("orden_anillo=")) {
             List<Integer> orden = parsearOrden(payload.substring("orden_anillo=".length()));
