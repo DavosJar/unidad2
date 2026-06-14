@@ -44,8 +44,8 @@ public class ServicioEleccionBully {
     public void iniciar() {
         this.ultimoHeartbeatRecibido = System.currentTimeMillis();
         scheduler = Executors.newSingleThreadScheduledExecutor();
-        scheduler.scheduleAtFixedRate(this::cicloHeartbeat, 5000, 2000, TimeUnit.MILLISECONDS);
-        scheduler.scheduleAtFixedRate(this::verificarHeartbeats, 5000, 2000, TimeUnit.MILLISECONDS);
+        scheduler.scheduleAtFixedRate(this::cicloHeartbeat, 5000, 5000, TimeUnit.MILLISECONDS);
+        scheduler.scheduleAtFixedRate(this::verificarHeartbeats, 5000, 5000, TimeUnit.MILLISECONDS);
     }
 
     @PreDestroy
@@ -65,7 +65,7 @@ public class ServicioEleccionBully {
         try {
             MensajeCluster msg = new MensajeCluster(
                 TipoMensaje.HEARTBEAT, idPropio, coord, "");
-            MensajeCluster.enviarSinRespuesta(msg, host, clusterPort, 1000);
+            MensajeCluster.enviarSinRespuesta(msg, host, clusterPort, 3000);
         } catch (IOException e) {
             log.debug("Heartbeat a {} fallo: {}", coord, e.getMessage());
         }
@@ -80,12 +80,12 @@ public class ServicioEleccionBully {
             return;
         }
         long diff = System.currentTimeMillis() - ultimoHeartbeatRecibido;
-        if (diff > 6000 && estadoCluster.getEstado() != EstadoNodo.EN_ELECCION) {
+        if (diff > 15000 && estadoCluster.getEstado() != EstadoNodo.EN_ELECCION) {
             log.warn("Nodo {} detecta caida del coordinador {}", idPropio, coord);
             iniciarEleccion();
         }
         if (estadoCluster.getEstado() == EstadoNodo.EN_ELECCION && esperandoOk) {
-            if (System.currentTimeMillis() - inicioEleccion > 3000) {
+            if (System.currentTimeMillis() - inicioEleccion > 8000) {
                 log.info("Timeout esperando OK, auto-proclamando nodo {}", idPropio);
                 proclamarseCoordinador();
             }
@@ -118,7 +118,7 @@ public class ServicioEleccionBully {
             try {
                 MensajeCluster msg = new MensajeCluster(
                     TipoMensaje.ELECTION, idPropio, idMayor, "");
-                MensajeCluster.enviarSinRespuesta(msg, host, clusterPort, 1000);
+                MensajeCluster.enviarSinRespuesta(msg, host, clusterPort, 3000);
                 esperandoOk = true;
             } catch (IOException e) {
                 log.debug("Nodo {} no responde a ELECTION: {}", idMayor, e.getMessage());
@@ -147,7 +147,7 @@ public class ServicioEleccionBully {
             try {
                 MensajeCluster msg = new MensajeCluster(
                     TipoMensaje.COORDINATOR, idPropio, idDest, ordenPayload.toString());
-                MensajeCluster.enviarSinRespuesta(msg, host, clusterPort, 1000);
+                MensajeCluster.enviarSinRespuesta(msg, host, clusterPort, 3000);
             } catch (IOException e) {
                 log.debug("Error enviando COORDINATOR a {}: {}", idDest, e.getMessage());
             }
@@ -161,7 +161,7 @@ public class ServicioEleccionBully {
                     MensajeCluster msg = new MensajeCluster(
                         TipoMensaje.TOKEN_RESEND, idPropio, congelado,
                         "destino=" + nuevoSiguiente);
-                    MensajeCluster.enviarSinRespuesta(msg, host, clusterPort, 1000);
+                    MensajeCluster.enviarSinRespuesta(msg, host, clusterPort, 3000);
                 } catch (IOException e) {
                     log.debug("Error enviando TOKEN_RESEND a {}: {}", congelado, e.getMessage());
                 }
@@ -209,7 +209,7 @@ public class ServicioEleccionBully {
                 TipoMensaje.HEARTBEAT_OK, estadoCluster.getIdPropio(), msg.getOrigen(), "");
             String host = estadoCluster.getPeers().get(msg.getOrigen());
             if (host != null) {
-                MensajeCluster.enviarSinRespuesta(respuesta, host, clusterPort, 1000);
+                MensajeCluster.enviarSinRespuesta(respuesta, host, clusterPort, 3000);
             }
         } catch (IOException e) {
             log.debug("Error enviando HEARTBEAT_OK a {}: {}", msg.getOrigen(), e.getMessage());
@@ -226,13 +226,14 @@ public class ServicioEleccionBully {
                 TipoMensaje.OK, estadoCluster.getIdPropio(), msg.getOrigen(), "");
             String host = estadoCluster.getPeers().get(msg.getOrigen());
             if (host != null) {
-                MensajeCluster.enviarSinRespuesta(ok, host, clusterPort, 1000);
+                MensajeCluster.enviarSinRespuesta(ok, host, clusterPort, 3000);
             }
         } catch (IOException e) {
             log.debug("Error enviando OK a {}: {}", msg.getOrigen(), e.getMessage());
         }
         if (msg.getOrigen() < estadoCluster.getIdPropio()
-                && estadoCluster.getEstado() != EstadoNodo.EN_ELECCION) {
+                && estadoCluster.getEstado() != EstadoNodo.EN_ELECCION
+                && estadoCluster.getCoordinadorActual() != estadoCluster.getIdPropio()) {
             log.info("Nodo {} inicia eleccion por ELECTION de {}", estadoCluster.getIdPropio(), msg.getOrigen());
             iniciarEleccion();
         }
@@ -309,7 +310,7 @@ public class ServicioEleccionBully {
                     MensajeCluster resend = new MensajeCluster(
                         TipoMensaje.TOKEN_RESEND, idPropio, msg.getOrigen(),
                         "destino=" + siguienteDeReportante);
-                    MensajeCluster.enviarSinRespuesta(resend, hostReporter, clusterPort, 1000);
+                    MensajeCluster.enviarSinRespuesta(resend, hostReporter, clusterPort, 3000);
                 } catch (IOException e) {
                     log.debug("Error en TOKEN_RESEND resync a {}: {}", msg.getOrigen(), e.getMessage());
                 }
@@ -321,7 +322,7 @@ public class ServicioEleccionBully {
             try {
                 MensajeCluster heartbeatCheck = new MensajeCluster(
                     TipoMensaje.HEARTBEAT, idPropio, nodoSospechoso, "");
-                MensajeCluster.RespuestaEnvio res = MensajeCluster.enviar(heartbeatCheck, hostSospechoso, clusterPort, 1000, 1);
+                MensajeCluster.RespuestaEnvio res = MensajeCluster.enviar(heartbeatCheck, hostSospechoso, clusterPort, 3000, 1);
                 if (res.fueExitoso()) {
                     log.info("TOKEN_LOST falso positivo, nodo {} esta vivo", nodoSospechoso);
                     String hostReporter = estadoCluster.getPeers().get(msg.getOrigen());
@@ -329,7 +330,7 @@ public class ServicioEleccionBully {
                         MensajeCluster retry = new MensajeCluster(
                             TipoMensaje.TOKEN_RETRY, idPropio, msg.getOrigen(),
                             "destino=" + nodoSospechoso);
-                        MensajeCluster.enviarSinRespuesta(retry, hostReporter, clusterPort, 1000);
+                        MensajeCluster.enviarSinRespuesta(retry, hostReporter, clusterPort, 3000);
                     }
                     return;
                 }
@@ -359,7 +360,7 @@ public class ServicioEleccionBully {
             try {
                 MensajeCluster update = new MensajeCluster(
                     TipoMensaje.RING_UPDATE, idPropio, idDest, ordenPayload.toString());
-                MensajeCluster.enviarSinRespuesta(update, host, clusterPort, 1000);
+                MensajeCluster.enviarSinRespuesta(update, host, clusterPort, 3000);
             } catch (IOException e) {
                 log.debug("Error enviando RING_UPDATE a {}: {}", idDest, e.getMessage());
             }
@@ -371,7 +372,7 @@ public class ServicioEleccionBully {
                 MensajeCluster resend = new MensajeCluster(
                     TipoMensaje.TOKEN_RESEND, idPropio, msg.getOrigen(),
                     "destino=" + nuevoSiguiente);
-                MensajeCluster.enviarSinRespuesta(resend, hostReporter, clusterPort, 1000);
+                MensajeCluster.enviarSinRespuesta(resend, hostReporter, clusterPort, 3000);
             } catch (IOException e) {
                 log.debug("Error enviando TOKEN_RESEND a {}: {}", msg.getOrigen(), e.getMessage());
             }
