@@ -231,9 +231,24 @@ public class ServicioEleccionBully {
         } catch (IOException e) {
             log.debug("Error enviando OK a {}: {}", msg.getOrigen(), e.getMessage());
         }
+
+        // Si ya soy el coordinador, confirmo autoridad con COORDINATOR
+        if (estadoCluster.getIdPropio() == estadoCluster.getCoordinadorActual()) {
+            try {
+                MensajeCluster coord = new MensajeCluster(
+                    TipoMensaje.COORDINATOR, estadoCluster.getIdPropio(), msg.getOrigen(), "");
+                String host = estadoCluster.getPeers().get(msg.getOrigen());
+                if (host != null) {
+                    MensajeCluster.enviarSinRespuesta(coord, host, clusterPort, 3000);
+                }
+            } catch (IOException e) {
+                log.debug("Error enviando COORDINATOR a {}: {}", msg.getOrigen(), e.getMessage());
+            }
+            return;
+        }
+
         if (msg.getOrigen() < estadoCluster.getIdPropio()
-                && estadoCluster.getEstado() != EstadoNodo.EN_ELECCION
-                && estadoCluster.getCoordinadorActual() != estadoCluster.getIdPropio()) {
+                && estadoCluster.getEstado() != EstadoNodo.EN_ELECCION) {
             log.info("Nodo {} inicia eleccion por ELECTION de {}", estadoCluster.getIdPropio(), msg.getOrigen());
             iniciarEleccion();
         }
