@@ -9,10 +9,12 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Lazy;
+import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Service;
 import java.util.Optional;
 
 @Service
+@Order(2)
 public class ServicioCristian implements CommandLineRunner {
 
     private static final Logger log = LoggerFactory.getLogger(ServicioCristian.class);
@@ -33,8 +35,16 @@ public class ServicioCristian implements CommandLineRunner {
 
     @Override
     public void run(String... args) throws Exception {
+        int timeoutMs = 30000;
+        int esperado = 0;
         while (!estadoCluster.isListenerListo() || !estadoCluster.estaInicializado()) {
             Thread.sleep(500);
+            esperado += 500;
+            if (esperado >= timeoutMs) {
+                log.warn("Timeout esperando inicialización del cluster (listenerListo={}, inicializado={}) después de {}ms",
+                    estadoCluster.isListenerListo(), estadoCluster.estaInicializado(), timeoutMs);
+                break;
+            }
         }
         if (estadoCluster.getIdPropio() == timeServerId) {
             estadoCluster.ajustarOffsetReloj(0L);

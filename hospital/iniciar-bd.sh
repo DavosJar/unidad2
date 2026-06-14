@@ -5,5 +5,6 @@ sudo docker run -d --name hospital-db -p 5432:5432 \
   -e POSTGRES_DB=hospital_db \
   -e POSTGRES_USER=hospital_user \
   -e POSTGRES_PASSWORD=hospital_pass \
+  -v hospital_pg_data:/var/lib/postgresql/data \
   postgres:17-alpine
 echo "BD lista en localhost:5432"

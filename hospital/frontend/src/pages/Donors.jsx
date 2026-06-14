@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import { useApi } from '../hooks/useApi';
-import { donors as donorsApi } from '../api/hospital';
+import { donors as donorsApi, reservations as reservationsApi } from '../api/hospital';
 import { useToast } from '../context/ToastContext';
 import Modal from '../components/Modal';
 import ConfirmDialog from '../components/ConfirmDialog';
@@ -106,9 +106,13 @@ export default function Donors() {
   }, [donors, debouncedSearch, filterOrgan, filterBlood, filterAvail]);
 
   async function handleReserve(donor) {
+    const paciente = window.prompt(`Ingrese el nombre del paciente para la reserva del órgano (${donor.organo} - ${donor.nombre}):`) || 'Paciente Anónimo';
     try {
+      // Ejecutar el endpoint de reservas para generar el registro
+      await reservationsApi.create({ idDonante: donor.id, paciente });
+      // Cambiar el estado del donante a reservado
       await donorsApi.reserve(donor.id);
-      toast(`Donante ${donor.nombre} reservado`, 'success');
+      toast(`Donante ${donor.nombre} reservado para ${paciente}`, 'success');
       refetch();
     } catch (e) {
       toast(e.message || 'Error al reservar', 'error');
