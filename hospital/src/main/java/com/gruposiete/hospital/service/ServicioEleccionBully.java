@@ -227,9 +227,17 @@ public class ServicioEleccionBully {
 
     private void procesarHeartbeat(MensajeCluster msg) {
         if (estadoCluster.getIdPropio() != estadoCluster.getCoordinadorActual()) return;
+        List<Integer> vivos = new ArrayList<>(estadoCluster.getPeers().keySet());
+        Collections.sort(vivos);
+        StringBuilder sb = new StringBuilder("orden_anillo=");
+        for (int i = 0; i < vivos.size(); i++) {
+            if (i > 0) sb.append(",");
+            sb.append(vivos.get(i));
+        }
+        estadoCluster.configurarAnillo(vivos);
         try {
             MensajeCluster respuesta = new MensajeCluster(
-                TipoMensaje.HEARTBEAT_OK, estadoCluster.getIdPropio(), msg.getOrigen(), "");
+                TipoMensaje.HEARTBEAT_OK, estadoCluster.getIdPropio(), msg.getOrigen(), sb.toString());
             String host = estadoCluster.getPeers().get(msg.getOrigen());
             if (host != null) {
                 MensajeCluster.enviarSinRespuesta(respuesta, host, clusterPort, 3000);
@@ -241,6 +249,13 @@ public class ServicioEleccionBully {
 
     private void procesarHeartbeatOk(MensajeCluster msg) {
         ultimoHeartbeatRecibido = System.currentTimeMillis();
+        String payload = msg.getPayload();
+        if (payload != null && payload.startsWith("orden_anillo=")) {
+            List<Integer> orden = parsearOrden(payload.substring("orden_anillo=".length()));
+            if (!orden.isEmpty()) {
+                estadoCluster.configurarAnillo(orden);
+            }
+        }
         int idPropio = estadoCluster.getIdPropio();
         int coord = estadoCluster.getCoordinadorActual();
         if ((coord == -1 || coord == idPropio) && msg.getOrigen() != idPropio) {
