@@ -43,6 +43,15 @@ public class ServicioEleccionBully {
     @PostConstruct
     public void iniciar() {
         this.ultimoHeartbeatRecibido = System.currentTimeMillis();
+        if (estadoCluster.estaInicializado()) {
+            descubrirCoordinadorInicial();
+        }
+        scheduler = Executors.newSingleThreadScheduledExecutor();
+        scheduler.scheduleAtFixedRate(this::cicloHeartbeat, 5000, 5000, TimeUnit.MILLISECONDS);
+        scheduler.scheduleAtFixedRate(this::verificarHeartbeats, 5000, 5000, TimeUnit.MILLISECONDS);
+    }
+
+    private void descubrirCoordinadorInicial() {
         int idPropio = estadoCluster.getIdPropio();
         boolean descubierto = false;
         for (int id : estadoCluster.getPeers().keySet()) {
@@ -62,9 +71,6 @@ public class ServicioEleccionBully {
         if (!descubierto) {
             log.info("Nodo {} no descubrio coordinador, mantiene coord={}", idPropio, estadoCluster.getCoordinadorActual());
         }
-        scheduler = Executors.newSingleThreadScheduledExecutor();
-        scheduler.scheduleAtFixedRate(this::cicloHeartbeat, 5000, 5000, TimeUnit.MILLISECONDS);
-        scheduler.scheduleAtFixedRate(this::verificarHeartbeats, 5000, 5000, TimeUnit.MILLISECONDS);
     }
 
     @PreDestroy
@@ -199,7 +205,6 @@ public class ServicioEleccionBully {
     }
 
     public synchronized void procesarMensaje(MensajeCluster msg) {
-        estadoCluster.agregarNodo(msg.getOrigen());
         switch (msg.getTipo()) {
             case HEARTBEAT:
                 procesarHeartbeat(msg);
