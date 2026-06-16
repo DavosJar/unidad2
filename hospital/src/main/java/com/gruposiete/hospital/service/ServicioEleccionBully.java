@@ -42,14 +42,6 @@ public class ServicioEleccionBully {
 
     @PostConstruct
     public void iniciar() {
-        while (!estadoCluster.isListenerListo()) {
-            try {
-                Thread.sleep(200);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                return;
-            }
-        }
         this.ultimoHeartbeatRecibido = System.currentTimeMillis();
         int idPropio = estadoCluster.getIdPropio();
         boolean descubierto = false;
