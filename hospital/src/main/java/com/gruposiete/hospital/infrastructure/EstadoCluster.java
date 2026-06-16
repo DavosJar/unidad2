@@ -24,6 +24,7 @@ public class EstadoCluster {
     private volatile EstadoNodo estado = EstadoNodo.NORMAL;
     private volatile int siguienteEnAnillo = -1;
     private volatile boolean tieneToken = false;
+    private volatile boolean tokenEnUso = false;
     private volatile Long offsetReloj = null;
     private volatile Integer nodoCongeladoReportante = null;
     private volatile boolean listenerListo = false;
@@ -76,6 +77,8 @@ public class EstadoCluster {
     }
 
     public synchronized boolean tieneToken() { return tieneToken; }
+    public synchronized boolean isTokenEnUso() { return tokenEnUso; }
+    public synchronized void setTokenEnUso(boolean enUso) { this.tokenEnUso = enUso; }
 
     public synchronized void darToken() {
         this.tieneToken = true;

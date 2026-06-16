@@ -45,7 +45,12 @@ export default function Reservations() {
       toast('Reserva creada exitosamente', 'success');
       refetch();
     } catch (err) {
-      toast(err.message || 'Error al crear la reserva', 'error');
+      const msgs = {
+        423: 'El sistema no tiene el token de exclusión mutua en este momento. Espere unos segundos y vuelva a intentar.',
+        409: 'El donante seleccionado ya fue reservado por otro nodo.',
+        404: 'Donante no encontrado. Puede que haya sido eliminado del sistema.',
+      };
+      toast(msgs[err.status] || err.message || 'Error al crear la reserva', 'error');
     } finally {
       setSubmitting(false);
     }

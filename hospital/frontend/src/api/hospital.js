@@ -7,7 +7,9 @@ async function request(url, options = {}) {
   });
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(text || `Error ${res.status}`);
+    const err = new Error(text || `Error ${res.status}`);
+    err.status = res.status;
+    throw err;
   }
   const contentType = res.headers.get('content-type');
   if (contentType && contentType.includes('application/json')) {

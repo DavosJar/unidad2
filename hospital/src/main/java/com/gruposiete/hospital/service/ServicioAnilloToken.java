@@ -57,6 +57,7 @@ public class ServicioAnilloToken {
     private void intentarPasarToken() {
         if (!estadoCluster.estaInicializado()) return;
         if (!estadoCluster.tieneToken()) return;
+        if (estadoCluster.isTokenEnUso()) return;
         long ahora = System.currentTimeMillis();
         if (ahora - timestampTokenRecibido < 300) return;
         int destino = estadoCluster.getSiguienteEnAnillo();

@@ -108,14 +108,16 @@ export default function Donors() {
   async function handleReserve(donor) {
     const paciente = window.prompt(`Ingrese el nombre del paciente para la reserva del órgano (${donor.organo} - ${donor.nombre}):`) || 'Paciente Anónimo';
     try {
-      // Ejecutar el endpoint de reservas para generar el registro
       await reservationsApi.create({ idDonante: donor.id, paciente });
-      // Cambiar el estado del donante a reservado
-      await donorsApi.reserve(donor.id);
       toast(`Donante ${donor.nombre} reservado para ${paciente}`, 'success');
       refetch();
     } catch (e) {
-      toast(e.message || 'Error al reservar', 'error');
+      const msgs = {
+        423: 'El sistema no tiene el token de exclusión mutua en este momento. Espere unos segundos y vuelva a intentar.',
+        409: `El donante "${donor.nombre}" ya fue reservado por otro nodo.`,
+        404: 'Donante no encontrado. Puede que haya sido eliminado del sistema.',
+      };
+      toast(msgs[e.status] || e.message || 'Error al reservar', 'error');
     }
   }
 

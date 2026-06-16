@@ -36,22 +36,27 @@ public class GestionReservas {
         if (!estadoCluster.tieneToken()) {
             logger.info("Nodo {} quiere reservar donante {} pero NO tiene token", nodo, idDonante);
             throw new ResponseStatusException(HttpStatus.LOCKED,
-                "Este nodo no posee el token de exclusion mutua");
+                "El nodo actual no posee el token de exclusión mutua. Espere a que el token llegue a este nodo e intente nuevamente.");
         }
-        logger.info("Nodo {} tiene token, reservando donante {}", nodo, idDonante);
-        RegistroDonante donante = repositorioDonantes.findById(idDonante)
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
-                "Donante no encontrado"));
-        if (!donante.isDisponible()) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                "El donante " + idDonante + " ya esta reservado");
+        estadoCluster.setTokenEnUso(true);
+        try {
+            logger.info("Nodo {} tiene token, reservando donante {}", nodo, idDonante);
+            RegistroDonante donante = repositorioDonantes.findById(idDonante)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
+                    "Donante no encontrado. El donante con ID " + idDonante + " no existe en el sistema."));
+            if (!donante.isDisponible()) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "El donante \"" + donante.getNombre() + "\" (ID " + idDonante + ") ya fue reservado por otro nodo del cluster.");
+            }
+            donante.setDisponible(false);
+            repositorioDonantes.save(donante);
+            Reserva reserva = new Reserva(idDonante, nombrePaciente, LocalDateTime.now());
+            Reserva reservaGuardada = repositorioReservas.save(reserva);
+            logger.info("Nodo {}: Reserva exitosa donante {}", nodo, idDonante);
+            return reservaGuardada;
+        } finally {
+            estadoCluster.setTokenEnUso(false);
         }
-        donante.setDisponible(false);
-        repositorioDonantes.save(donante);
-        Reserva reserva = new Reserva(idDonante, nombrePaciente, LocalDateTime.now());
-        Reserva reservaGuardada = repositorioReservas.save(reserva);
-        logger.info("Nodo {}: Reserva exitosa donante {}", nodo, idDonante);
-        return reservaGuardada;
     }
 
     public List<Reserva> listarReservas() {
