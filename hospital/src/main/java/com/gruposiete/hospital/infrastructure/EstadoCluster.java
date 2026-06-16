@@ -19,6 +19,7 @@ public class EstadoCluster {
 
     private int idPropio;
     private final Map<Integer, String> peers = new ConcurrentHashMap<>();
+    private final Map<Integer, String> todosLosPeers = new ConcurrentHashMap<>();
     private volatile int coordinadorActual;
     private volatile EstadoNodo estado = EstadoNodo.NORMAL;
     private volatile int siguienteEnAnillo = -1;
@@ -33,6 +34,8 @@ public class EstadoCluster {
         this.idPropio = idPropio;
         this.peers.clear();
         this.peers.putAll(peers);
+        this.todosLosPeers.clear();
+        this.todosLosPeers.putAll(peers);
         this.coordinadorActual = peers.keySet().stream().mapToInt(Integer::intValue).max().orElse(idPropio);
         this.estado = (idPropio == coordinadorActual) ? EstadoNodo.COORDINADOR : EstadoNodo.NORMAL;
         List<Integer> ordenados = new ArrayList<>(peers.keySet());
@@ -94,6 +97,13 @@ public class EstadoCluster {
         }
         Collections.sort(mayores);
         return mayores;
+    }
+
+    public synchronized void agregarNodo(int id) {
+        String host = todosLosPeers.get(id);
+        if (host != null && !peers.containsKey(id)) {
+            peers.put(id, host);
+        }
     }
 
     public synchronized void removerNodo(int id) {

@@ -42,7 +42,34 @@ public class ServicioEleccionBully {
 
     @PostConstruct
     public void iniciar() {
+        while (!estadoCluster.isListenerListo()) {
+            try {
+                Thread.sleep(200);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
         this.ultimoHeartbeatRecibido = System.currentTimeMillis();
+        int idPropio = estadoCluster.getIdPropio();
+        boolean descubierto = false;
+        for (int id : estadoCluster.getPeers().keySet()) {
+            if (id == idPropio) continue;
+            String host = estadoCluster.getPeers().get(id);
+            if (host == null) continue;
+            MensajeCluster probe = new MensajeCluster(TipoMensaje.HEARTBEAT, idPropio, id, "");
+            MensajeCluster.RespuestaEnvio res = MensajeCluster.enviar(probe, host, clusterPort, 2000, 0);
+            if (res.fueExitoso() && res.getRespuesta() != null) {
+                estadoCluster.marcarCoordinador(res.getRespuesta().getOrigen());
+                ultimoHeartbeatRecibido = System.currentTimeMillis();
+                log.info("Nodo {} descubrio coordinador {} durante inicio", idPropio, res.getRespuesta().getOrigen());
+                descubierto = true;
+                break;
+            }
+        }
+        if (!descubierto) {
+            log.info("Nodo {} no descubrio coordinador, mantiene coord={}", idPropio, estadoCluster.getCoordinadorActual());
+        }
         scheduler = Executors.newSingleThreadScheduledExecutor();
         scheduler.scheduleAtFixedRate(this::cicloHeartbeat, 5000, 5000, TimeUnit.MILLISECONDS);
         scheduler.scheduleAtFixedRate(this::verificarHeartbeats, 5000, 5000, TimeUnit.MILLISECONDS);
@@ -84,9 +111,12 @@ public class ServicioEleccionBully {
             log.warn("Nodo {} detecta caida del coordinador {}", idPropio, coord);
             iniciarEleccion();
         }
-        if (estadoCluster.getEstado() == EstadoNodo.EN_ELECCION && esperandoOk) {
-            if (System.currentTimeMillis() - inicioEleccion > 8000) {
+        if (estadoCluster.getEstado() == EstadoNodo.EN_ELECCION) {
+            if (esperandoOk && System.currentTimeMillis() - inicioEleccion > 8000) {
                 log.info("Timeout esperando OK, auto-proclamando nodo {}", idPropio);
+                proclamarseCoordinador();
+            } else if (!esperandoOk && System.currentTimeMillis() - inicioEleccion > 10000) {
+                log.info("Timeout esperando COORDINATOR, auto-proclamando nodo {}", idPropio);
                 proclamarseCoordinador();
             }
         }
@@ -177,6 +207,7 @@ public class ServicioEleccionBully {
     }
 
     public synchronized void procesarMensaje(MensajeCluster msg) {
+        estadoCluster.agregarNodo(msg.getOrigen());
         switch (msg.getTipo()) {
             case HEARTBEAT:
                 procesarHeartbeat(msg);
@@ -218,6 +249,12 @@ public class ServicioEleccionBully {
 
     private void procesarHeartbeatOk(MensajeCluster msg) {
         ultimoHeartbeatRecibido = System.currentTimeMillis();
+        int idPropio = estadoCluster.getIdPropio();
+        int coord = estadoCluster.getCoordinadorActual();
+        if ((coord == -1 || coord == idPropio) && msg.getOrigen() != idPropio) {
+            estadoCluster.marcarCoordinador(msg.getOrigen());
+            log.info("Nodo {} reconoce coordinador {} via HEARTBEAT_OK", idPropio, msg.getOrigen());
+        }
     }
 
     private void procesarElection(MensajeCluster msg) {
@@ -256,14 +293,19 @@ public class ServicioEleccionBully {
 
     private void procesarOk(MensajeCluster msg) {
         if (estadoCluster.getEstado() == EstadoNodo.EN_ELECCION) {
-            log.info("Nodo {} recibio OK de {}, detiene eleccion", estadoCluster.getIdPropio(), msg.getOrigen());
+            log.info("Nodo {} recibio OK de {}, esperando COORDINATOR", estadoCluster.getIdPropio(), msg.getOrigen());
             esperandoOk = false;
-            estadoCluster.setEstado(EstadoNodo.NORMAL);
+            inicioEleccion = System.currentTimeMillis();
         }
     }
 
     private void procesarCoordinator(MensajeCluster msg) {
         int idPropio = estadoCluster.getIdPropio();
+        if (estadoCluster.getCoordinadorActual() != -1
+                && estadoCluster.getEstado() != EstadoNodo.EN_ELECCION) {
+            log.info("Nodo {} ignora COORDINATOR de {} (coord actual {})", idPropio, msg.getOrigen(), estadoCluster.getCoordinadorActual());
+            return;
+        }
         estadoCluster.marcarCoordinador(msg.getOrigen());
         ultimoHeartbeatRecibido = System.currentTimeMillis();
         String payload = msg.getPayload();
