@@ -119,7 +119,12 @@ public class ServicioAnilloToken {
             return;
         }
         String host = estadoCluster.getPeers().get(coord);
-        if (host == null) return;
+        if (host == null || !estadoCluster.estaVivo(coord)) {
+            log.warn("Coordinador {} no alcanzable, reteniendo token", coord);
+            estadoCluster.darToken();
+            timestampFrozen = 0;
+            return;
+        }
         estadoCluster.congelarToken();
         estadoCluster.setNodoCongeladoReportante(estadoCluster.getIdPropio());
         timestampFrozen = System.currentTimeMillis();
@@ -130,7 +135,10 @@ public class ServicioAnilloToken {
             MensajeCluster.enviarSinRespuesta(reporte, host, clusterPort, 1000);
             log.warn("TOKEN_LOST reportado a coordinador {}, nodo sospechoso {}", coord, destino);
         } catch (IOException e) {
-            log.error("Error enviando TOKEN_LOST: {}", e.getMessage());
+            log.error("Error enviando TOKEN_LOST a coordinador {}: {}, reteniendo token", coord, e.getMessage());
+            estadoCluster.darToken();
+            estadoCluster.limpiarNodoCongeladoReportante();
+            timestampFrozen = 0;
         }
     }
 
