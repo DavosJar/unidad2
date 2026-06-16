@@ -81,6 +81,23 @@ public class ServicioCristian implements CommandLineRunner {
                     } catch (Exception e) {
                         log.warn("No se pudo persistir log: {}", e.getMessage());
                     }
+                    if (offset != 0) {
+                        try {
+                            long newEpochSec = (System.currentTimeMillis() + offset) / 1000;
+                            ProcessBuilder pb = new ProcessBuilder("sudo", "date", "-s", "@" + newEpochSec);
+                            pb.redirectErrorStream(true);
+                            Process p = pb.start();
+                            int exitCode = p.waitFor();
+                            if (exitCode == 0) {
+                                log.info("Reloj del sistema ajustado con offset={}ms", offset);
+                            } else {
+                                String error = new String(p.getInputStream().readAllBytes()).trim();
+                                log.error("Error ajustando reloj (exit={}): {}", exitCode, error);
+                            }
+                        } catch (Exception e) {
+                            log.error("Error ejecutando sudo date: {}", e.getMessage());
+                        }
+                    }
                     return;
                 }
                 reintentos++;
