@@ -121,7 +121,12 @@ public class ServicioEleccionBully {
             return;
         }
         if (coord == -1 && estadoCluster.getEstado() != EstadoNodo.EN_ELECCION) {
-            return; // No coordinator yet — discovery via cicloHeartbeat, not Bully
+            long diff = System.currentTimeMillis() - ultimoHeartbeatRecibido;
+            if (diff > 20000) {
+                log.warn("Nodo {} sin coordinador por 20s, iniciando eleccion", idPropio);
+                iniciarEleccion();
+            }
+            return;
         }
         long diff = System.currentTimeMillis() - ultimoHeartbeatRecibido;
         if (diff > 15000 && estadoCluster.getEstado() != EstadoNodo.EN_ELECCION) {
@@ -250,18 +255,24 @@ public class ServicioEleccionBully {
     }
 
     private void procesarHeartbeat(MensajeCluster msg) {
-        if (estadoCluster.getIdPropio() != estadoCluster.getCoordinadorActual()) return;
-        List<Integer> vivos = new ArrayList<>(estadoCluster.getPeers().keySet());
-        Collections.sort(vivos);
-        StringBuilder sb = new StringBuilder("orden_anillo=");
-        for (int i = 0; i < vivos.size(); i++) {
-            if (i > 0) sb.append(",");
-            sb.append(vivos.get(i));
+        int idPropio = estadoCluster.getIdPropio();
+        int coord = estadoCluster.getCoordinadorActual();
+        StringBuilder payload = new StringBuilder();
+        if (idPropio == coord) {
+            List<Integer> vivos = new ArrayList<>(estadoCluster.getPeers().keySet());
+            Collections.sort(vivos);
+            payload.append("orden_anillo=");
+            for (int i = 0; i < vivos.size(); i++) {
+                if (i > 0) payload.append(",");
+                payload.append(vivos.get(i));
+            }
+            estadoCluster.configurarAnillo(vivos);
+        } else if (coord != -1) {
+            payload.append("coord=").append(coord);
         }
-        estadoCluster.configurarAnillo(vivos);
         try {
             MensajeCluster respuesta = new MensajeCluster(
-                TipoMensaje.HEARTBEAT_OK, estadoCluster.getIdPropio(), msg.getOrigen(), sb.toString());
+                TipoMensaje.HEARTBEAT_OK, idPropio, msg.getOrigen(), payload.toString());
             String host = estadoCluster.getPeers().get(msg.getOrigen());
             if (host != null) {
                 MensajeCluster.enviarSinRespuesta(respuesta, host, clusterPort, 3000);
@@ -274,17 +285,30 @@ public class ServicioEleccionBully {
     private void procesarHeartbeatOk(MensajeCluster msg) {
         ultimoHeartbeatRecibido = System.currentTimeMillis();
         String payload = msg.getPayload();
-        if (payload != null && payload.startsWith("orden_anillo=")) {
-            List<Integer> orden = parsearOrden(payload.substring("orden_anillo=".length()));
-            if (!orden.isEmpty()) {
-                estadoCluster.configurarAnillo(orden);
-            }
-        }
         int idPropio = estadoCluster.getIdPropio();
         int coord = estadoCluster.getCoordinadorActual();
-        if ((coord == -1 || coord == idPropio) && msg.getOrigen() != idPropio) {
-            estadoCluster.marcarCoordinador(msg.getOrigen());
-            log.info("Nodo {} reconoce coordinador {} via HEARTBEAT_OK", idPropio, msg.getOrigen());
+
+        if (payload != null && !payload.isEmpty()) {
+            if (payload.startsWith("orden_anillo=")) {
+                List<Integer> orden = parsearOrden(payload.substring("orden_anillo=".length()));
+                if (!orden.isEmpty()) {
+                    estadoCluster.configurarAnillo(orden);
+                }
+                if (coord == -1 && msg.getOrigen() != idPropio) {
+                    estadoCluster.marcarCoordinador(msg.getOrigen());
+                    log.info("Nodo {} descubre coordinador {} via HEARTBEAT_OK", idPropio, msg.getOrigen());
+                }
+            } else if (payload.startsWith("coord=")) {
+                try {
+                    int coordFromPayload = Integer.parseInt(payload.substring("coord=".length()));
+                    if (coord == -1 && coordFromPayload != -1 && coordFromPayload != idPropio) {
+                        estadoCluster.marcarCoordinador(coordFromPayload);
+                        log.info("Nodo {} descubre coordinador {} via payload", idPropio, coordFromPayload);
+                    }
+                } catch (NumberFormatException e) {
+                    log.warn("coord invalido en payload: {}", payload);
+                }
+            }
         }
     }
 

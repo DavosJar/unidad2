@@ -12,6 +12,9 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -85,9 +88,33 @@ public class ServicioAnilloToken {
     }
 
     private void manejarFalloToken(int destino) {
+        estadoCluster.removerNodo(destino);
+        // Try to find another alive peer to pass the token
+        List<Integer> orden = new ArrayList<>(estadoCluster.getPeers().keySet());
+        Collections.sort(orden);
+        int idx = orden.indexOf(estadoCluster.getIdPropio());
+        if (idx >= 0) {
+            for (int offset = 1; offset < orden.size(); offset++) {
+                int candidato = orden.get((idx + offset) % orden.size());
+                if (candidato == estadoCluster.getIdPropio()) continue;
+                String host = estadoCluster.getPeers().get(candidato);
+                if (host == null) continue;
+                MensajeCluster msg = new MensajeCluster(
+                    TipoMensaje.TOKEN, estadoCluster.getIdPropio(), candidato, "");
+                MensajeCluster.RespuestaEnvio res = MensajeCluster.enviar(msg, host, clusterPort, 4000, 1);
+                if (res.fueExitoso()) {
+                    estadoCluster.quitarToken();
+                    log.debug("Token pasado a nodo {} (skip {})", candidato, destino);
+                    return;
+                }
+                log.debug("Nodo {} tambien muerto, siguiente", candidato);
+            }
+        }
+        // Everyone dead, freeze and report to coordinator
         int coord = estadoCluster.getCoordinadorActual();
         if (coord == -1) {
-            log.error("No hay coordinador conocido, no se puede reportar TOKEN_LOST");
+            log.warn("No hay coordinador, reteniendo token");
+            estadoCluster.darToken();
             return;
         }
         String host = estadoCluster.getPeers().get(coord);

@@ -36,8 +36,8 @@ public class EstadoCluster {
         this.peers.putAll(peers);
         this.todosLosPeers.clear();
         this.todosLosPeers.putAll(peers);
-        this.coordinadorActual = peers.keySet().stream().mapToInt(Integer::intValue).max().orElse(idPropio);
-        this.estado = (idPropio == coordinadorActual) ? EstadoNodo.COORDINADOR : EstadoNodo.NORMAL;
+        this.coordinadorActual = -1;
+        this.estado = EstadoNodo.NORMAL;
         List<Integer> ordenados = new ArrayList<>(peers.keySet());
         Collections.sort(ordenados);
         for (int i = 0; i < ordenados.size(); i++) {
