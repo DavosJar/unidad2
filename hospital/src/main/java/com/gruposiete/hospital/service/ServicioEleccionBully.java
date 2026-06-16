@@ -84,7 +84,23 @@ public class ServicioEleccionBully {
         if (!estadoCluster.estaInicializado()) return;
         int idPropio = estadoCluster.getIdPropio();
         int coord = estadoCluster.getCoordinadorActual();
-        if (idPropio == coord) return;
+        if (idPropio == coord || coord == -1) {
+            // Discovery mode: probe one peer per cycle to find the real coordinator
+            for (int id : estadoCluster.getPeers().keySet()) {
+                if (id == idPropio) continue;
+                String host = estadoCluster.getPeers().get(id);
+                if (host == null) continue;
+                try {
+                    MensajeCluster msg = new MensajeCluster(
+                        TipoMensaje.HEARTBEAT, idPropio, id, "");
+                    MensajeCluster.enviarSinRespuesta(msg, host, clusterPort, 3000);
+                } catch (IOException e) {
+                    log.debug("Discovery heartbeat a {} fallo: {}", id, e.getMessage());
+                }
+                break; // one probe per cycle
+            }
+            return;
+        }
         String host = estadoCluster.getPeers().get(coord);
         if (host == null) return;
         try {
@@ -103,6 +119,9 @@ public class ServicioEleccionBully {
         if (idPropio == coord) {
             ultimoHeartbeatRecibido = System.currentTimeMillis();
             return;
+        }
+        if (coord == -1 && estadoCluster.getEstado() != EstadoNodo.EN_ELECCION) {
+            return; // No coordinator yet — discovery via cicloHeartbeat, not Bully
         }
         long diff = System.currentTimeMillis() - ultimoHeartbeatRecibido;
         if (diff > 15000 && estadoCluster.getEstado() != EstadoNodo.EN_ELECCION) {
