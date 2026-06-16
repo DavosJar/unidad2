@@ -1,10 +1,9 @@
 #!/bin/bash
-# demo-cluster.sh seed | run
-# seed: inserta 5 donantes
-# run:  lanza 10 reservas contra el mismo donante en localhost
+# demo-cluster.sh
+# seed:  inserta 5 donantes (una vez)
+# test:  bateria de 10 operaciones mezcladas
 
 seed() {
-    echo "=== Insertando 5 donantes ==="
     PGPASSWORD=hospital_pass psql -h localhost -U hospital_user -d hospital_db -c "
         INSERT INTO registros_donantes (nombre, tipo_sangre, organo, disponible)
         SELECT * FROM (VALUES
@@ -21,24 +20,45 @@ seed() {
         "SELECT id, nombre, organo FROM registros_donantes ORDER BY id;"
 }
 
-run() {
-    echo "=== 10 reservas contra donante 5 (Laura Martin - Corazon) ==="
-    for i in $(seq 1 10); do
-        HTTP=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
-            "http://localhost:8080/api/reservas?idDonante=5&paciente=Paciente$i")
-        case $HTTP in
-            200) echo "[$i] 200 OK - Reservado" ;;
-            409) echo "[$i] 409 CONFLICT - Donante ya reservado" ;;
-            423) echo "[$i] 423 LOCKED - Sin token" ;;
-            *)   echo "[$i] $HTTP" ;;
-        esac
+test() {
+    BASE=${1:-http://localhost:8080}
+    echo "=== 10 operaciones contra $BASE ==="
+    echo ""
+
+    # 1-3: consultas (GET donantes)
+    for i in 1 2 3; do
+        HTTP=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/api/donantes")
+        echo "[$i] GET /api/donantes -> $HTTP"
     done
-    echo "=== Resultado ==="
-    curl -s http://localhost:8080/api/reservas
+
+    # 4-6: intentos de reserva sobre distintos donantes
+    for i in 4 5 6; do
+        DON=$((i - 3))
+        HTTP=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+            "$BASE/api/reservas?idDonante=$DON&paciente=Paciente$i")
+        echo "[$i] POST reserva donante $DON -> $HTTP"
+    done
+
+    # 7-8: consultar reservas y donantes disponibles
+    HTTP=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/api/reservas")
+    echo "[7] GET /api/reservas -> $HTTP"
+    HTTP=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/api/donantes/disponibles")
+    echo "[8] GET /api/donantes/disponibles -> $HTTP"
+
+    # 9-10: dos reservas mas contra el mismo donante para ver exclusion
+    for i in 9 10; do
+        HTTP=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+            "$BASE/api/reservas?idDonante=5&paciente=Paciente$i")
+        echo "[$i] POST reserva donante 5 -> $HTTP"
+    done
+
+    echo ""
+    echo "=== Resultado final ==="
+    curl -s "$BASE/api/reservas" | python3 -m json.tool 2>/dev/null || curl -s "$BASE/api/reservas"
 }
 
 case "$1" in
     seed) seed ;;
-    run)  run ;;
-    *)    echo "Uso: ./demo-cluster.sh seed | run" ;;
+    test) test "$2" ;;
+    *)    echo "Uso: ./demo-cluster.sh seed | test [URL]" ;;
 esac
