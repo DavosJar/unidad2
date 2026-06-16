@@ -40,8 +40,8 @@ public class ServicioAnilloToken {
     @PostConstruct
     public void iniciar() {
         scheduler = Executors.newSingleThreadScheduledExecutor();
-        scheduler.scheduleAtFixedRate(this::intentarPasarToken, 6000, 2000, TimeUnit.MILLISECONDS);
-        scheduler.scheduleAtFixedRate(this::verificarTimeoutToken, 7000, 2000, TimeUnit.MILLISECONDS);
+        scheduler.scheduleAtFixedRate(this::intentarPasarToken, 2000, 300, TimeUnit.MILLISECONDS);
+        scheduler.scheduleAtFixedRate(this::verificarTimeoutToken, 2500, 500, TimeUnit.MILLISECONDS);
     }
 
     @PreDestroy
@@ -55,7 +55,7 @@ public class ServicioAnilloToken {
         if (!estadoCluster.estaInicializado()) return;
         if (!estadoCluster.tieneToken()) return;
         long ahora = System.currentTimeMillis();
-        if (ahora - timestampTokenRecibido < 2000) return;
+        if (ahora - timestampTokenRecibido < 300) return;
         int destino = estadoCluster.getSiguienteEnAnillo();
         if (destino == -1 || destino == estadoCluster.getIdPropio()) return;
         String host = estadoCluster.getPeers().get(destino);
@@ -111,10 +111,10 @@ public class ServicioAnilloToken {
         if (timestampTokenRecibido == 0) return;
         if (estadoCluster.tieneToken()) return;
         long diff = System.currentTimeMillis() - timestampTokenRecibido;
-        if (diff > 6000) {
+        if (diff > 3000) {
             timestampTokenRecibido = 0;
         }
-        if (timestampFrozen > 0 && System.currentTimeMillis() - timestampFrozen > 6000) {
+        if (timestampFrozen > 0 && System.currentTimeMillis() - timestampFrozen > 3000) {
             log.warn("Timeout frozen, reenviando TOKEN_LOST al coordinador actual");
             int coord = estadoCluster.getCoordinadorActual();
             if (coord != -1) {

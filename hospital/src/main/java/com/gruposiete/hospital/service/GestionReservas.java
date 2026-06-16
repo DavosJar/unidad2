@@ -32,10 +32,13 @@ public class GestionReservas {
     }
 
     public Reserva registrarReserva(Long idDonante, String nombrePaciente) {
+        int nodo = nodeIdentity.getNodeIdAsInt();
         if (!estadoCluster.tieneToken()) {
+            logger.info("Nodo {} quiere reservar donante {} pero NO tiene token", nodo, idDonante);
             throw new ResponseStatusException(HttpStatus.LOCKED,
                 "Este nodo no posee el token de exclusion mutua");
         }
+        logger.info("Nodo {} tiene token, reservando donante {}", nodo, idDonante);
         RegistroDonante donante = repositorioDonantes.findById(idDonante)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
                 "Donante no encontrado"));
@@ -47,7 +50,7 @@ public class GestionReservas {
         repositorioDonantes.save(donante);
         Reserva reserva = new Reserva(idDonante, nombrePaciente, LocalDateTime.now());
         Reserva reservaGuardada = repositorioReservas.save(reserva);
-        logger.info("Nodo {}: Registró una nueva reserva para donante {}", nodeIdentity.getNodeId(), idDonante);
+        logger.info("Nodo {}: Reserva exitosa donante {}", nodo, idDonante);
         return reservaGuardada;
     }
 
