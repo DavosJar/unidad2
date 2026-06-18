@@ -30,7 +30,7 @@ services:
       DB_PASSWORD: hospital_pass
       SPRING_JPA_HIBERNATE_DDL_AUTO: none
       NODE_ID: 1
-      CLUSTER_PEERS: app-node1,app-node2,app-node3,app-node4,app-node5
+      CLUSTER_PEERS: app-node1,app-node2,app-node3,app-node4
     depends_on:
       db:
         condition: service_healthy
@@ -46,7 +46,7 @@ services:
       DB_PASSWORD: hospital_pass
       SPRING_JPA_HIBERNATE_DDL_AUTO: none
       NODE_ID: 2
-      CLUSTER_PEERS: app-node1,app-node2,app-node3,app-node4,app-node5
+      CLUSTER_PEERS: app-node1,app-node2,app-node3,app-node4
     depends_on:
       db:
         condition: service_healthy
@@ -62,7 +62,7 @@ services:
       DB_PASSWORD: hospital_pass
       SPRING_JPA_HIBERNATE_DDL_AUTO: none
       NODE_ID: 3
-      CLUSTER_PEERS: app-node1,app-node2,app-node3,app-node4,app-node5
+      CLUSTER_PEERS: app-node1,app-node2,app-node3,app-node4
     depends_on:
       db:
         condition: service_healthy
@@ -78,23 +78,7 @@ services:
       DB_PASSWORD: hospital_pass
       SPRING_JPA_HIBERNATE_DDL_AUTO: none
       NODE_ID: 4
-      CLUSTER_PEERS: app-node1,app-node2,app-node3,app-node4,app-node5
-    depends_on:
-      db:
-        condition: service_healthy
-
-  app-node5:
-    image: hospital-cluster:latest
-    container_name: hospital-app-5
-    ports:
-      - "8085:8080"
-    environment:
-      DB_URL: jdbc:postgresql://db:5432/hospital_db
-      DB_USER: hospital_user
-      DB_PASSWORD: hospital_pass
-      SPRING_JPA_HIBERNATE_DDL_AUTO: none
-      NODE_ID: 5
-      CLUSTER_PEERS: app-node1,app-node2,app-node3,app-node4,app-node5
+      CLUSTER_PEERS: app-node1,app-node2,app-node3,app-node4
     depends_on:
       db:
         condition: service_healthy

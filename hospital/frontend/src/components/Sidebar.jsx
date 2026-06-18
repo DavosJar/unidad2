@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Users, Calendar, Activity, ChevronLeft, ChevronRight, X, HeartPulse } from 'lucide-react';
+import { LayoutDashboard, Users, Calendar, Activity, ChevronLeft, ChevronRight, X, HeartPulse, Network } from 'lucide-react';
 import './Sidebar.css';
 
 const links = [
@@ -7,6 +7,7 @@ const links = [
   { to: '/donors', label: 'Donantes', icon: Users },
   { to: '/reservations', label: 'Reservas', icon: Calendar },
   { to: '/logs', label: 'Actividad', icon: Activity },
+  { to: '/cluster', label: 'Cluster', icon: Network },
 ];
 
 export default function Sidebar({ collapsed, onToggle, mobileOpen, onMobileClose }) {

@@ -352,10 +352,14 @@ public class ServicioEleccionBully {
     }
 
     private void procesarHeartbeatOk(MensajeCluster msg) {
-        ultimoHeartbeatRecibido = System.currentTimeMillis();
         String payload = msg.getPayload();
         int idPropio = estadoCluster.getIdPropio();
         int coord = estadoCluster.getCoordinadorActual();
+
+        // Si ya tenemos coordinador, consideramos el heartbeat valido para renovar timeout
+        if (coord != -1) {
+            ultimoHeartbeatRecibido = System.currentTimeMillis();
+        }
 
         if (payload == null || payload.isEmpty()) return;
 
@@ -426,6 +430,7 @@ public class ServicioEleccionBully {
             // No tengo coordinador
             if (coordRemoto > idPropio) {
                 estadoCluster.marcarCoordinador(coordRemoto);
+                ultimoHeartbeatRecibido = System.currentTimeMillis();
                 log.info("Nodo {} descubre coordinador {} via HEARTBEAT_OK", idPropio, coordRemoto);
             } else {
                 // El remoto tiene menor ID, yo deberia ser coordinador

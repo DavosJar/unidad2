@@ -9,6 +9,7 @@ const breadcrumbMap = {
   '/donors': 'Gestión de Donantes',
   '/reservations': 'Reservas de Órganos',
   '/logs': 'Registro de Actividad',
+  '/cluster': 'Cluster de Nodos',
 };
 
 export default function Layout() {

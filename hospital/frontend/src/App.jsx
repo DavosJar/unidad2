@@ -5,6 +5,7 @@ import Dashboard from './pages/Dashboard';
 import Donors from './pages/Donors';
 import Reservations from './pages/Reservations';
 import Logs from './pages/Logs';
+import Cluster from './pages/Cluster';
 
 export default function App() {
   return (
@@ -16,6 +17,7 @@ export default function App() {
           <Route path="/donors" element={<Donors />} />
           <Route path="/reservations" element={<Reservations />} />
           <Route path="/logs" element={<Logs />} />
+          <Route path="/cluster" element={<Cluster />} />
         </Route>
       </Routes>
     </ToastProvider>
