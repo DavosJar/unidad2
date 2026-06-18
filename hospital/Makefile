@@ -22,6 +22,15 @@ republish:
 	docker push 192.168.101.3:5000/hospital:latest
 	@echo "=> ✅ Imagen actualizada en registry"
 	
+build-extract:
+	@echo "=> 🐳 Build de app-node1 con compose..."
+	@echo "=> 📦 Extrayendo jar del contenedor builder..."
+	sudo docker compose build app-node1
+	sudo docker rm temp 2>/dev/null || true
+	sudo docker create --name temp hospital-cluster:latest
+	sudo docker cp temp:/app/hospital.jar target/hospital-0.0.1-SNAPSHOT.jar
+	sudo docker rm temp
+
 deploy:
 	@echo "=> 🗑️  Removiendo stack anterior..."
 	sudo docker stack rm hospital || true

@@ -108,6 +108,11 @@ public class ServicioMonitorConexion {
         log.warn("Nodo {} entra en estado DESCONECTADO", idPropio);
         estadoCluster.marcarCoordinador(-1);
         estadoCluster.setEstado(EstadoNodo.DESCONECTADO);
+        if (estadoCluster.tieneToken()) {
+            estadoCluster.quitarToken();
+            log.warn("Nodo {} destruye su token al desconectarse", idPropio);
+        }
+        estadoCluster.limpiarNodoCongeladoReportante();
         try {
             gestionLogs.registrar("Nodo " + idPropio + " se desconecto del cluster (router no responde)");
         } catch (Exception e) {

@@ -1,6 +1,7 @@
 package com.gruposiete.hospital.service;
 
 import com.gruposiete.hospital.infrastructure.EstadoCluster;
+import com.gruposiete.hospital.infrastructure.EstadoCluster.EstadoNodo;
 import com.gruposiete.hospital.model.MensajeCluster;
 import com.gruposiete.hospital.model.MensajeCluster.TipoMensaje;
 import com.gruposiete.hospital.service.GestionLogs;
@@ -56,6 +57,7 @@ public class ServicioAnilloToken {
 
     private void intentarPasarToken() {
         if (!estadoCluster.estaInicializado()) return;
+        if (estadoCluster.getEstado() == EstadoNodo.DESCONECTADO) return;
         if (!estadoCluster.tieneToken()) return;
         if (estadoCluster.isTokenEnUso()) return;
         long ahora = System.currentTimeMillis();
@@ -89,53 +91,84 @@ public class ServicioAnilloToken {
     }
 
     private void manejarFalloToken(int destino) {
-        estadoCluster.removerNodo(destino);
-        // Try to find another alive peer to pass the token
-        List<Integer> orden = new ArrayList<>(estadoCluster.getPeers().keySet());
-        Collections.sort(orden);
-        int idx = orden.indexOf(estadoCluster.getIdPropio());
-        if (idx >= 0) {
-            for (int offset = 1; offset < orden.size(); offset++) {
-                int candidato = orden.get((idx + offset) % orden.size());
-                if (candidato == estadoCluster.getIdPropio()) continue;
-                String host = estadoCluster.getPeers().get(candidato);
-                if (host == null) continue;
-                MensajeCluster msg = new MensajeCluster(
-                    TipoMensaje.TOKEN, estadoCluster.getIdPropio(), candidato, "");
-                MensajeCluster.RespuestaEnvio res = MensajeCluster.enviar(msg, host, clusterPort, 4000, 1);
-                if (res.fueExitoso()) {
-                    estadoCluster.quitarToken();
-                    log.debug("Token pasado a nodo {} (skip {})", candidato, destino);
-                    return;
-                }
-                log.debug("Nodo {} tambien muerto, siguiente", candidato);
-            }
-        }
-        // Everyone dead, freeze and report to coordinator
+        int miId = estadoCluster.getIdPropio();
         int coord = estadoCluster.getCoordinadorActual();
-        if (coord == -1) {
+
+        if (estadoCluster.getEstado() == EstadoNodo.DESCONECTADO) {
+            log.debug("Nodo {} en DESCONECTADO, ignora fallo de token a {}", miId, destino);
+            return;
+        }
+
+        if (miId == coord) {
+            estadoCluster.removerNodo(destino);
+            List<Integer> vivos = new ArrayList<>(estadoCluster.getPeers().keySet());
+            Collections.sort(vivos);
+            StringBuilder ordenPayload = new StringBuilder("orden_anillo=");
+            for (int i = 0; i < vivos.size(); i++) {
+                if (i > 0) ordenPayload.append(",");
+                ordenPayload.append(vivos.get(i));
+            }
+            estadoCluster.configurarAnillo(vivos);
+            for (int idDest : vivos) {
+                if (idDest == miId) continue;
+                String host = estadoCluster.getPeers().get(idDest);
+                if (host == null) continue;
+                try {
+                    MensajeCluster update = new MensajeCluster(
+                        TipoMensaje.RING_UPDATE, miId, idDest, ordenPayload.toString());
+                    MensajeCluster.enviarSinRespuesta(update, host, clusterPort, 3000);
+                } catch (IOException e) {
+                    log.debug("Error enviando RING_UPDATE a {}: {}", idDest, e.getMessage());
+                }
+            }
+            int nuevoDestino = estadoCluster.getSiguienteEnAnillo();
+            if (nuevoDestino != -1 && nuevoDestino != miId) {
+                String host = estadoCluster.getPeers().get(nuevoDestino);
+                if (host != null) {
+                    try {
+                        MensajeCluster token = new MensajeCluster(
+                            TipoMensaje.TOKEN, miId, nuevoDestino, "");
+                        MensajeCluster.RespuestaEnvio res = MensajeCluster.enviar(token, host, clusterPort, 4000, 1);
+                        if (res.fueExitoso()) {
+                            estadoCluster.quitarToken();
+                            log.warn("Token pasado a nuevo sucesor {} tras caida de {}", nuevoDestino, destino);
+                            try { gestionLogs.registrar("Coordinador " + miId + " removio nodo " + destino + " del anillo, token a " + nuevoDestino); }
+                            catch (Exception e) { log.warn("No se pudo persistir log: {}", e.getMessage()); }
+                            return;
+                        }
+                    } catch (Exception e) {
+                        log.error("Error pasando token a nuevo sucesor {}: {}", nuevoDestino, e.getMessage());
+                    }
+                }
+            }
+            log.warn("Coordinador no pudo pasar token a nadie, reteniendo");
+            return;
+        }
+
+        int hostCoord = coord;
+        if (hostCoord == -1) {
             log.warn("No hay coordinador, reteniendo token");
             estadoCluster.darToken();
             return;
         }
-        String host = estadoCluster.getPeers().get(coord);
-        if (host == null || !estadoCluster.estaVivo(coord)) {
-            log.warn("Coordinador {} no alcanzable, reteniendo token", coord);
+        String host = estadoCluster.getPeers().get(hostCoord);
+        if (host == null || !estadoCluster.estaVivo(hostCoord)) {
+            log.warn("Coordinador {} no alcanzable, reteniendo token", hostCoord);
             estadoCluster.darToken();
             timestampFrozen = 0;
             return;
         }
         estadoCluster.congelarToken();
-        estadoCluster.setNodoCongeladoReportante(estadoCluster.getIdPropio());
+        estadoCluster.setNodoCongeladoReportante(miId);
         timestampFrozen = System.currentTimeMillis();
         try {
             MensajeCluster reporte = new MensajeCluster(
-                TipoMensaje.TOKEN_LOST, estadoCluster.getIdPropio(), coord,
+                TipoMensaje.TOKEN_LOST, miId, hostCoord,
                 "nodo_sospechoso=" + destino);
             MensajeCluster.enviarSinRespuesta(reporte, host, clusterPort, 1000);
-            log.warn("TOKEN_LOST reportado a coordinador {}, nodo sospechoso {}", coord, destino);
+            log.warn("TOKEN_LOST reportado a coordinador {}, nodo sospechoso {}", hostCoord, destino);
         } catch (IOException e) {
-            log.error("Error enviando TOKEN_LOST a coordinador {}: {}, reteniendo token", coord, e.getMessage());
+            log.error("Error enviando TOKEN_LOST a coordinador {}: {}, reteniendo token", hostCoord, e.getMessage());
             estadoCluster.darToken();
             estadoCluster.limpiarNodoCongeladoReportante();
             timestampFrozen = 0;
