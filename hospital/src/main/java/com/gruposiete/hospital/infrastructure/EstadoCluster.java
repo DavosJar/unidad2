@@ -14,7 +14,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class EstadoCluster {
 
     public enum EstadoNodo {
-        NORMAL, EN_ELECCION, COORDINADOR
+        NORMAL, EN_ELECCION, COORDINADOR, DESCONECTADO
     }
 
     private int idPropio;
@@ -29,6 +29,7 @@ public class EstadoCluster {
     private volatile Integer nodoCongeladoReportante = null;
     private volatile boolean listenerListo = false;
     private volatile boolean inicializado = false;
+    private volatile long ultimoMensajeRecibido = System.currentTimeMillis();
 
     // No requiere synchronized: se ejecuta una sola vez antes de iniciar los hilos del cluster
     public void inicializar(int idPropio, Map<Integer, String> peers) {
@@ -54,6 +55,7 @@ public class EstadoCluster {
 
     public int getIdPropio() { return idPropio; }
     public Map<Integer, String> getPeers() { return Collections.unmodifiableMap(peers); }
+    public Map<Integer, String> getTodosLosPeers() { return Collections.unmodifiableMap(todosLosPeers); }
     public int getCoordinadorActual() { return coordinadorActual; }
     public EstadoNodo getEstado() { return estado; }
     public int getSiguienteEnAnillo() { return siguienteEnAnillo; }
@@ -137,4 +139,9 @@ public class EstadoCluster {
     public boolean isListenerListo() { return listenerListo; }
 
     public boolean estaInicializado() { return inicializado; }
+
+    public void notificarMensajeRecibido() {
+        this.ultimoMensajeRecibido = System.currentTimeMillis();
+    }
+    public long getUltimoMensajeRecibido() { return ultimoMensajeRecibido; }
 }

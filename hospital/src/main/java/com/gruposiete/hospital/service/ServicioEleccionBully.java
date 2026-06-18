@@ -30,14 +30,17 @@ public class ServicioEleccionBully {
 
     private final EstadoCluster estadoCluster;
     private final GestionLogs gestionLogs;
+    private final ServicioMonitorConexion monitorConexion;
     private ScheduledExecutorService scheduler;
     private volatile long ultimoHeartbeatRecibido;
     private volatile long inicioEleccion = 0;
     private volatile boolean esperandoOk = false;
 
-    public ServicioEleccionBully(EstadoCluster estadoCluster, @Lazy GestionLogs gestionLogs) {
+    public ServicioEleccionBully(EstadoCluster estadoCluster, @Lazy GestionLogs gestionLogs,
+                                  ServicioMonitorConexion monitorConexion) {
         this.estadoCluster = estadoCluster;
         this.gestionLogs = gestionLogs;
+        this.monitorConexion = monitorConexion;
     }
 
     @PostConstruct
@@ -49,6 +52,10 @@ public class ServicioEleccionBully {
         scheduler = Executors.newSingleThreadScheduledExecutor();
         scheduler.scheduleAtFixedRate(this::cicloHeartbeat, 5000, 5000, TimeUnit.MILLISECONDS);
         scheduler.scheduleAtFixedRate(this::verificarHeartbeats, 5000, 5000, TimeUnit.MILLISECONDS);
+        monitorConexion.registrarCallbacks(
+            this::proclamarseCoordinador,
+            (id) -> estadoCluster.marcarCoordinador(id)
+        );
     }
 
     private void descubrirCoordinadorInicial() {
@@ -61,9 +68,41 @@ public class ServicioEleccionBully {
             MensajeCluster probe = new MensajeCluster(TipoMensaje.HEARTBEAT, idPropio, id, "");
             MensajeCluster.RespuestaEnvio res = MensajeCluster.enviar(probe, host, clusterPort, 2000, 0);
             if (res.fueExitoso() && res.getRespuesta() != null) {
-                estadoCluster.marcarCoordinador(res.getRespuesta().getOrigen());
-                ultimoHeartbeatRecibido = System.currentTimeMillis();
-                log.info("Nodo {} descubrio coordinador {} durante inicio", idPropio, res.getRespuesta().getOrigen());
+                MensajeCluster respuesta = res.getRespuesta();
+                String payload = respuesta.getPayload();
+                int coordDescubierto = -1;
+                boolean coordEsResponder = false;
+                if (payload != null && payload.startsWith("orden_anillo=")) {
+                    // El que responde ES el coordinador
+                    coordDescubierto = respuesta.getOrigen();
+                    coordEsResponder = true;
+                    List<Integer> orden = parsearOrden(payload.substring("orden_anillo=".length()));
+                    if (!orden.isEmpty()) {
+                        estadoCluster.configurarAnillo(orden);
+                    }
+                } else if (payload != null && payload.startsWith("coord=")) {
+                    try {
+                        coordDescubierto = Integer.parseInt(payload.substring("coord=".length()));
+                    } catch (NumberFormatException e) {
+                        coordDescubierto = -1;
+                    }
+                }
+                if (coordDescubierto != -1 && coordDescubierto != idPropio) {
+                    if (coordDescubierto > idPropio) {
+                        estadoCluster.marcarCoordinador(coordDescubierto);
+                        ultimoHeartbeatRecibido = System.currentTimeMillis();
+                        log.info("Nodo {} descubrio coordinador {} durante inicio", idPropio, coordDescubierto);
+                    } else if (coordDescubierto < idPropio) {
+                        log.info("Nodo {} descubrio coordinador {} con ID menor durante inicio, me proclamo", idPropio, coordDescubierto);
+                        scheduler.schedule(this::iniciarEleccion, 500, TimeUnit.MILLISECONDS);
+                    }
+                } else if (!coordEsResponder && respuesta.getOrigen() != idPropio) {
+                    // No hay coordinador conocido (coord=-1), el responder es un peer normal
+                    // Marcar temporalmente para establecer comunicación
+                    estadoCluster.marcarCoordinador(respuesta.getOrigen());
+                    ultimoHeartbeatRecibido = System.currentTimeMillis();
+                    log.info("Nodo {} marca temporalmente coordinador {} durante inicio", idPropio, respuesta.getOrigen());
+                }
                 descubierto = true;
                 break;
             }
@@ -82,6 +121,8 @@ public class ServicioEleccionBully {
 
     private void cicloHeartbeat() {
         if (!estadoCluster.estaInicializado()) return;
+        // Si estoy desconectado, no envio heartbeats
+        if (estadoCluster.getEstado() == EstadoNodo.DESCONECTADO) return;
         int idPropio = estadoCluster.getIdPropio();
         int coord = estadoCluster.getCoordinadorActual();
         if (idPropio == coord || coord == -1) {
@@ -114,13 +155,20 @@ public class ServicioEleccionBully {
 
     private void verificarHeartbeats() {
         if (!estadoCluster.estaInicializado()) return;
+        EstadoNodo estado = estadoCluster.getEstado();
+
+        // Si estoy DESCONECTADO, el monitor de conexion maneja la reconexion
+        if (estado == EstadoNodo.DESCONECTADO) return;
+
         int idPropio = estadoCluster.getIdPropio();
         int coord = estadoCluster.getCoordinadorActual();
+
+        // Logica original de heartbeats
         if (idPropio == coord) {
             ultimoHeartbeatRecibido = System.currentTimeMillis();
             return;
         }
-        if (coord == -1 && estadoCluster.getEstado() != EstadoNodo.EN_ELECCION) {
+        if (coord == -1 && estado != EstadoNodo.EN_ELECCION) {
             long diff = System.currentTimeMillis() - ultimoHeartbeatRecibido;
             if (diff > 20000) {
                 log.warn("Nodo {} sin coordinador por 20s, iniciando eleccion", idPropio);
@@ -129,11 +177,11 @@ public class ServicioEleccionBully {
             return;
         }
         long diff = System.currentTimeMillis() - ultimoHeartbeatRecibido;
-        if (diff > 15000 && estadoCluster.getEstado() != EstadoNodo.EN_ELECCION) {
+        if (diff > 15000 && estado != EstadoNodo.EN_ELECCION) {
             log.warn("Nodo {} detecta caida del coordinador {}", idPropio, coord);
             iniciarEleccion();
         }
-        if (estadoCluster.getEstado() == EstadoNodo.EN_ELECCION) {
+        if (estado == EstadoNodo.EN_ELECCION) {
             if (esperandoOk && System.currentTimeMillis() - inicioEleccion > 8000) {
                 log.info("Timeout esperando OK, auto-proclamando nodo {}", idPropio);
                 proclamarseCoordinador();
@@ -229,6 +277,13 @@ public class ServicioEleccionBully {
     }
 
     public synchronized void procesarMensaje(MensajeCluster msg) {
+        // Si estaba DESCONECTADO y alguien me habla, la red volvio
+        if (estadoCluster.getEstado() == EstadoNodo.DESCONECTADO) {
+            log.info("Nodo {} recibe mensaje en DESCONECTADO de {}, la red volvio",
+                     estadoCluster.getIdPropio(), msg.getOrigen());
+            estadoCluster.setEstado(EstadoNodo.NORMAL);
+            // No escaneamos, el mensaje mismo iniciara el flujo bully normal
+        }
         switch (msg.getTipo()) {
             case HEARTBEAT:
                 procesarHeartbeat(msg);
@@ -257,6 +312,16 @@ public class ServicioEleccionBully {
     private void procesarHeartbeat(MensajeCluster msg) {
         int idPropio = estadoCluster.getIdPropio();
         int coord = estadoCluster.getCoordinadorActual();
+
+        // Si soy coordinador y el que envia tiene mayor ID, debe ceder
+        if (idPropio == coord && msg.getOrigen() > idPropio) {
+            log.info("Nodo {} recibe HEARTBEAT de nodo superior {}, cediendo coordinacion",
+                     idPropio, msg.getOrigen());
+            // Responder con orden_anillo para que el otro sepa el estado actual
+            // Pero no marcar como coordinador aqui - lo hara el cuando procese HEARTBEAT_OK
+            // No obstante, si el otro tiene mayor ID, deberia automaticamente ganar
+        }
+
         StringBuilder payload = new StringBuilder();
         if (idPropio == coord) {
             List<Integer> vivos = new ArrayList<>(estadoCluster.getPeers().keySet());
@@ -269,6 +334,10 @@ public class ServicioEleccionBully {
             estadoCluster.configurarAnillo(vivos);
         } else if (coord != -1) {
             payload.append("coord=").append(coord);
+            // Si el que envia tiene mayor ID que mi coordinador, reportarlo
+            if (msg.getOrigen() > coord && msg.getOrigen() != idPropio) {
+                payload.append(";superior=").append(msg.getOrigen());
+            }
         }
         try {
             MensajeCluster respuesta = new MensajeCluster(
@@ -288,31 +357,111 @@ public class ServicioEleccionBully {
         int idPropio = estadoCluster.getIdPropio();
         int coord = estadoCluster.getCoordinadorActual();
 
-        if (payload != null && !payload.isEmpty()) {
-            if (payload.startsWith("orden_anillo=")) {
-                List<Integer> orden = parsearOrden(payload.substring("orden_anillo=".length()));
-                if (!orden.isEmpty()) {
-                    estadoCluster.configurarAnillo(orden);
-                }
-                if (coord == -1 && msg.getOrigen() != idPropio) {
-                    estadoCluster.marcarCoordinador(msg.getOrigen());
-                    log.info("Nodo {} descubre coordinador {} via HEARTBEAT_OK", idPropio, msg.getOrigen());
-                }
-            } else if (payload.startsWith("coord=")) {
-                try {
-                    int coordFromPayload = Integer.parseInt(payload.substring("coord=".length()));
-                    if (coord == -1 && coordFromPayload != -1 && coordFromPayload != idPropio) {
-                        estadoCluster.marcarCoordinador(coordFromPayload);
-                        log.info("Nodo {} descubre coordinador {} via payload", idPropio, coordFromPayload);
+        if (payload == null || payload.isEmpty()) return;
+
+        if (payload.startsWith("orden_anillo=")) {
+            List<Integer> orden = parsearOrden(payload.substring("orden_anillo=".length()));
+            if (!orden.isEmpty()) {
+                estadoCluster.configurarAnillo(orden);
+            }
+            procesarHeartbeatOkConConflicto(msg.getOrigen(), idPropio, coord);
+        } else if (payload.startsWith("coord=")) {
+            String resto = payload;
+            int coordFromPayload = -1;
+            int superiorFromPayload = -1;
+
+            // Parsear coord=X
+            int coordEnd = resto.indexOf(';');
+            String coordPart = (coordEnd == -1) ? resto : resto.substring(0, coordEnd);
+            try {
+                coordFromPayload = Integer.parseInt(coordPart.substring("coord=".length()));
+            } catch (NumberFormatException e) {
+                log.warn("coord invalido en payload: {}", payload);
+                return;
+            }
+
+            // Parsear ;superior=Y si existe
+            if (coordEnd != -1) {
+                String resto2 = resto.substring(coordEnd + 1);
+                if (resto2.startsWith("superior=")) {
+                    try {
+                        superiorFromPayload = Integer.parseInt(resto2.substring("superior=".length()));
+                    } catch (NumberFormatException e) {
+                        // ignorar
                     }
-                } catch (NumberFormatException e) {
-                    log.warn("coord invalido en payload: {}", payload);
+                }
+            }
+
+            // Procesar coordinador
+            if (coordFromPayload != -1 && coordFromPayload != idPropio) {
+                procesarHeartbeatOkConConflicto(coordFromPayload, idPropio, coord);
+            }
+
+            // Si hay un nodo superior vivo y yo no soy ese superior
+            if (superiorFromPayload != -1 && superiorFromPayload != idPropio) {
+                if (idPropio > coord && (coord == -1 || idPropio > coord)) {
+                    // Yo soy aun mayor, no necesito hacer nada especial
+                } else if (superiorFromPayload > coord) {
+                    log.info("Nodo {} detecta nodo superior {} via HEARTBEAT_OK payload",
+                             idPropio, superiorFromPayload);
+                    // Si yo mismo soy el superior, ya procesarHeartbeatOkConConflicto lo maneja
                 }
             }
         }
     }
 
+    /**
+     * Logica central para resolver conflictos de liderazgo:
+     * - Si no tengo coordinador (coord==-1) → acepto si el remoto tiene mayor ID, me proclamo si tiene menor
+     * - Si tengo coordinador (coord!=-1) y el remoto es DIFERENTE:
+     *   - Si remoto > coord → el cluster ya reconocio a alguien de mayor ID, acepto
+     *   - Si remoto < coord → el remoto no es legitimo, no hago nada (mi coordinador actual es de mayor ID)
+     * - Si soy yo mismo quien deberia ser coordinador (idPropio > coord y coord != idPropio):
+     *   - Me proclamo coordinador (tengo mayor ID que mi propio coordinador)
+     */
+    private void procesarHeartbeatOkConConflicto(int coordRemoto, int idPropio, int coord) {
+        if (coordRemoto == idPropio) return;
+
+        if (coord == -1) {
+            // No tengo coordinador
+            if (coordRemoto > idPropio) {
+                estadoCluster.marcarCoordinador(coordRemoto);
+                log.info("Nodo {} descubre coordinador {} via HEARTBEAT_OK", idPropio, coordRemoto);
+            } else {
+                // El remoto tiene menor ID, yo deberia ser coordinador
+                log.info("Nodo {} descubre coordinador {} con ID menor via HEARTBEAT_OK, me proclamo",
+                         idPropio, coordRemoto);
+                proclamarseCoordinador();
+            }
+            return;
+        }
+
+        // YA tengo coordinador
+        if (coordRemoto != coord) {
+            // Conflicto: dos coordinadores diferentes
+            if (coordRemoto > coord) {
+                // El remoto tiene mayor ID que mi coordinador actual → el cluster ya se actualizo
+                log.info("Nodo {} actualiza coordinador {} -> {} via HEARTBEAT_OK",
+                         idPropio, coord, coordRemoto);
+                estadoCluster.marcarCoordinador(coordRemoto);
+                return;
+            }
+            // coordRemoto < coord: mi coordinador actual tiene mayor ID, el remoto es ilegitimo
+            log.debug("Nodo {} ignora coordinador remoto {} (mi coordinador {} tiene mayor ID)",
+                      idPropio, coordRemoto, coord);
+            return;
+        }
+
+        // coordRemoto == coord: mismo coordinador, verificar si YO deberia serlo
+        if (idPropio > coord) {
+            log.info("Nodo {} detecta que deberia ser coordinador (ID {} > {}), me proclamo",
+                     idPropio, idPropio, coord);
+            proclamarseCoordinador();
+        }
+    }
+
     private void procesarElection(MensajeCluster msg) {
+        // Siempre responder OK para confirmar que estoy vivo
         try {
             MensajeCluster ok = new MensajeCluster(
                 TipoMensaje.OK, estadoCluster.getIdPropio(), msg.getOrigen(), "");
@@ -324,11 +473,19 @@ public class ServicioEleccionBully {
             log.debug("Error enviando OK a {}: {}", msg.getOrigen(), e.getMessage());
         }
 
-        // Si ya soy el coordinador, confirmo autoridad con COORDINATOR
-        if (estadoCluster.getIdPropio() == estadoCluster.getCoordinadorActual()) {
+        int idPropio = estadoCluster.getIdPropio();
+
+        // Si ya soy el coordinador
+        if (idPropio == estadoCluster.getCoordinadorActual()) {
+            // Si el que pregunta tiene mayor ID, dejar que él tome el control
+            if (msg.getOrigen() > idPropio) {
+                log.info("Nodo {} recibe ELECTION de nodo superior {}, cediendo autoridad", idPropio, msg.getOrigen());
+                return;
+            }
+            // Si tiene menor ID, reafirmo mi autoridad con COORDINATOR
             try {
                 MensajeCluster coord = new MensajeCluster(
-                    TipoMensaje.COORDINATOR, estadoCluster.getIdPropio(), msg.getOrigen(), "");
+                    TipoMensaje.COORDINATOR, idPropio, msg.getOrigen(), "");
                 String host = estadoCluster.getPeers().get(msg.getOrigen());
                 if (host != null) {
                     MensajeCluster.enviarSinRespuesta(coord, host, clusterPort, 3000);
@@ -339,9 +496,10 @@ public class ServicioEleccionBully {
             return;
         }
 
-        if (msg.getOrigen() < estadoCluster.getIdPropio()
+        // Si no soy coordinador y el que pregunta tiene menor ID, iniciar eleccion
+        if (msg.getOrigen() < idPropio
                 && estadoCluster.getEstado() != EstadoNodo.EN_ELECCION) {
-            log.info("Nodo {} inicia eleccion por ELECTION de {}", estadoCluster.getIdPropio(), msg.getOrigen());
+            log.info("Nodo {} inicia eleccion por ELECTION de {}", idPropio, msg.getOrigen());
             iniciarEleccion();
         }
     }
@@ -356,26 +514,34 @@ public class ServicioEleccionBully {
 
     private void procesarCoordinator(MensajeCluster msg) {
         int idPropio = estadoCluster.getIdPropio();
-        if (estadoCluster.getCoordinadorActual() != -1
-                && estadoCluster.getEstado() != EstadoNodo.EN_ELECCION) {
-            log.info("Nodo {} ignora COORDINATOR de {} (coord actual {})", idPropio, msg.getOrigen(), estadoCluster.getCoordinadorActual());
+        // Si el que envió COORDINATOR tiene menor ID, rechazar y auto-proclamarse
+        if (msg.getOrigen() < idPropio) {
+            log.info("Nodo {} rechaza COORDINATOR de nodo inferior {} (yo tengo mayor ID), me proclamo coordinador",
+                     idPropio, msg.getOrigen());
+            proclamarseCoordinador();
             return;
         }
-        estadoCluster.marcarCoordinador(msg.getOrigen());
-        ultimoHeartbeatRecibido = System.currentTimeMillis();
-        String payload = msg.getPayload();
-        if (payload != null && payload.startsWith("orden_anillo=")) {
-            List<Integer> orden = parsearOrden(payload.substring("orden_anillo=".length()));
-            if (!orden.isEmpty()) {
-                estadoCluster.configurarAnillo(orden);
+        // Si el que envió COORDINATOR tiene mayor ID, siempre aceptar (autoridad incuestionable)
+        if (msg.getOrigen() > idPropio) {
+            log.info("Nodo {} acepta COORDINATOR de nodo superior {}", idPropio, msg.getOrigen());
+            estadoCluster.marcarCoordinador(msg.getOrigen());
+            ultimoHeartbeatRecibido = System.currentTimeMillis();
+            String payload = msg.getPayload();
+            if (payload != null && payload.startsWith("orden_anillo=")) {
+                List<Integer> orden = parsearOrden(payload.substring("orden_anillo=".length()));
+                if (!orden.isEmpty()) {
+                    estadoCluster.configurarAnillo(orden);
+                }
             }
+            try {
+                gestionLogs.registrar("Nodo " + idPropio + " reconoce coordinador nodo " + msg.getOrigen());
+            } catch (Exception e) {
+                log.warn("No se pudo persistir log: {}", e.getMessage());
+            }
+            return;
         }
-        log.info("Nodo {} reconoce coordinador {}", idPropio, msg.getOrigen());
-        try {
-            gestionLogs.registrar("Nodo " + idPropio + " reconoce coordinador nodo " + msg.getOrigen());
-        } catch (Exception e) {
-            log.warn("No se pudo persistir log: {}", e.getMessage());
-        }
+        // msg.getOrigen() == idPropio → ignorar mensaje propio
+        log.debug("Nodo {} ignora COORDINATOR de si mismo", idPropio);
     }
 
     private void procesarRingUpdate(MensajeCluster msg) {

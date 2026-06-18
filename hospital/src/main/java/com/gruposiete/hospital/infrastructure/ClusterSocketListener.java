@@ -86,6 +86,7 @@ public class ClusterSocketListener implements CommandLineRunner {
             MensajeCluster msg = MensajeCluster.parsear(linea);
             log.debug("Nodo {} recibe {} de {}", estadoCluster.getIdPropio(), msg.getTipo(), msg.getOrigen());
             estadoCluster.agregarNodo(msg.getOrigen());
+            estadoCluster.notificarMensajeRecibido();
             Optional<MensajeCluster> respuesta = Optional.empty();
             switch (msg.getTipo()) {
                 case HEARTBEAT, HEARTBEAT_OK, ELECTION, OK, COORDINATOR, RING_UPDATE, TOKEN_LOST:
