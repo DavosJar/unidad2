@@ -177,7 +177,7 @@ public class ServicioEleccionBully {
             return;
         }
         long diff = System.currentTimeMillis() - ultimoHeartbeatRecibido;
-        if (diff > 2500 && estado != EstadoNodo.EN_ELECCION) {
+        if (diff > 4500 && estado != EstadoNodo.EN_ELECCION) {
             log.warn("Nodo {} detecta caida del coordinador {}", idPropio, coord);
             iniciarEleccion();
         }
@@ -519,16 +519,49 @@ public class ServicioEleccionBully {
 
     private void procesarCoordinator(MensajeCluster msg) {
         int idPropio = estadoCluster.getIdPropio();
-        // Si el que envió COORDINATOR tiene menor ID, rechazar y auto-proclamarse
-        if (msg.getOrigen() < idPropio) {
-            log.info("Nodo {} rechaza COORDINATOR de nodo inferior {} (yo tengo mayor ID), me proclamo coordinador",
-                     idPropio, msg.getOrigen());
+        int coordActual = estadoCluster.getCoordinadorActual();
+        int origen = msg.getOrigen();
+
+        if (origen < idPropio) {
+            log.info("Nodo {} rechaza COORDINATOR de {} (yo soy mayor), me proclamo", idPropio, origen);
             proclamarseCoordinador();
             return;
         }
-        // Si el que envió COORDINATOR tiene mayor ID, siempre aceptar (autoridad incuestionable)
-        if (msg.getOrigen() > idPropio) {
-            log.info("Nodo {} acepta COORDINATOR de nodo superior {}", idPropio, msg.getOrigen());
+
+        // NUEVO: verificar si hay algún peer conocido con ID mayor que el candidato
+        int maxIdConocido = estadoCluster.getPeers().keySet().stream()
+            .mapToInt(Integer::intValue)
+            .max()
+            .orElse(origen);
+
+        if (origen < maxIdConocido) {
+            // El candidato no es el mayor ID vivo conocido — verificar si el mayor responde
+            String hostMayor = estadoCluster.getPeers().get(maxIdConocido);
+            if (hostMayor != null) {
+                try {
+                    MensajeCluster probe = new MensajeCluster(
+                        TipoMensaje.HEARTBEAT, idPropio, maxIdConocido, "");
+                    MensajeCluster.RespuestaEnvio res = 
+                        MensajeCluster.enviar(probe, hostMayor, clusterPort, 1500, 1);
+                    if (res.fueExitoso()) {
+                        log.info("Nodo {} rechaza COORDINATOR de {} porque nodo {} sigue vivo",
+                                 idPropio, origen, maxIdConocido);
+                        return; // esperar que el mayor se proclame
+                    }
+                } catch (Exception e) {
+                    log.debug("Probe a nodo mayor {} falló, acepto COORDINATOR de {}", maxIdConocido, origen);
+                }
+            }
+        }
+
+        if (coordActual != -1 && origen < coordActual) {
+            log.info("Nodo {} rechaza COORDINATOR de {} porque ya conoce coordinador superior {}",
+                     idPropio, origen, coordActual);
+            return;
+        }
+
+        if (origen > idPropio) {
+            log.info("Nodo {} acepta COORDINATOR de nodo superior {}", idPropio, origen);
             estadoCluster.marcarCoordinador(msg.getOrigen());
             ultimoHeartbeatRecibido = System.currentTimeMillis();
             String payload = msg.getPayload();
