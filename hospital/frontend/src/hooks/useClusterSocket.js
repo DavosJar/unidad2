@@ -92,5 +92,25 @@ export function useClusterSocket() {
     };
   }, [connect]);
 
+  useEffect(() => {
+    if (connected) return;
+
+    // Polling silencioso de reconexión cada 2 segundos cuando el socket no está conectado
+    const interval = setInterval(() => {
+      fetch('/actuator/health')
+        .then((res) => {
+          if (res.ok) {
+            console.log('[WebSocket] Backend detectado en línea vía health check, reintentando conexión...');
+            connect();
+          }
+        })
+        .catch(() => {
+          // Ignorar errores: el backend sigue caído
+        });
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [connected, connect]);
+
   return { clusterState, connected, error, tokenHistory, reconnect: connect };
 }
