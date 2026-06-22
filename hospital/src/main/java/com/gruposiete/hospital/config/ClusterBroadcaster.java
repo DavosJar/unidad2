@@ -38,8 +38,13 @@ public class ClusterBroadcaster {
         Map<String, Object> payload = new LinkedHashMap<>();
 
         // Nodos vivos actualmente
-        List<Integer> vivos = new ArrayList<>(estadoCluster.getPeers().keySet());
-        Collections.sort(vivos);
+        List<Integer> vivos;
+        if (estadoCluster.getEstado() == EstadoCluster.EstadoNodo.DESCONECTADO) {
+            vivos = Collections.emptyList();
+        } else {
+            vivos = new ArrayList<>(estadoCluster.getPeers().keySet());
+            Collections.sort(vivos);
+        }
         payload.put("nodeIds", vivos);
 
         // Todos los nodos alguna vez conocidos

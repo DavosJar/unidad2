@@ -113,6 +113,7 @@ public class ServicioMonitorConexion {
             log.warn("Nodo {} destruye su token al desconectarse", idPropio);
         }
         estadoCluster.limpiarNodoCongeladoReportante();
+        estadoCluster.limpiarPeersExceptoPropio();
         try {
             gestionLogs.registrar("Nodo " + idPropio + " se desconecto del cluster (router no responde)");
         } catch (Exception e) {
@@ -141,7 +142,8 @@ public class ServicioMonitorConexion {
     private void escanearPeersDescendente() {
         int idPropio = estadoCluster.getIdPropio();
         List<Integer> ids = new ArrayList<>(estadoCluster.getTodosLosPeers().keySet());
-        Collections.sort(ids, Collections.reverseOrder());
+        List<Integer> vivos = new ArrayList<>();
+        vivos.add(idPropio);
 
         for (int peerId : ids) {
             if (peerId == idPropio) continue;
@@ -150,23 +152,31 @@ public class ServicioMonitorConexion {
 
             try {
                 MensajeCluster probe = new MensajeCluster(TipoMensaje.HEARTBEAT, idPropio, peerId, "");
-                MensajeCluster.RespuestaEnvio res = MensajeCluster.enviar(probe, host, clusterPort, 2000, 0);
+                MensajeCluster.RespuestaEnvio res = MensajeCluster.enviar(probe, host, clusterPort, 1000, 0);
                 if (res.fueExitoso()) {
-                    if (peerId < idPropio) {
-                        log.info("Nodo {} escaneo: peer {} responde con ID menor -> me proclamo coordinador",
-                                 idPropio, peerId);
-                        if (onReconnectProclamar != null) onReconnectProclamar.run();
-                    } else {
-                        log.info("Nodo {} escaneo: peer {} responde con ID mayor -> acepto su coordinacion",
-                                 idPropio, peerId);
-                        if (onReconnectAceptarCoordinador != null) onReconnectAceptarCoordinador.accept(peerId);
-                    }
-                    return;
+                    vivos.add(peerId);
                 }
             } catch (Exception e) {
                 log.debug("Nodo {} no responde en escaneo: {}", peerId, e.getMessage());
             }
         }
-        log.info("Nodo {} escaneo: ningun peer responde, el cluster parece vacio", idPropio);
+
+        estadoCluster.sincronizarPeers(vivos);
+        Collections.sort(vivos);
+
+        if (vivos.size() == 1) {
+            log.info("Nodo {} escaneo: ningun peer responde, el cluster parece vacio", idPropio);
+            if (onReconnectProclamar != null) onReconnectProclamar.run();
+            return;
+        }
+
+        int mayor = vivos.get(vivos.size() - 1);
+        if (mayor == idPropio) {
+            log.info("Nodo {} escaneo: soy el mayor vivo -> me proclamo coordinador", idPropio);
+            if (onReconnectProclamar != null) onReconnectProclamar.run();
+        } else {
+            log.info("Nodo {} escaneo: nodo {} es el mayor vivo -> acepto su coordinacion", idPropio, mayor);
+            if (onReconnectAceptarCoordinador != null) onReconnectAceptarCoordinador.accept(mayor);
+        }
     }
 }

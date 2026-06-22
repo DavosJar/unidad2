@@ -164,4 +164,12 @@ public class EstadoCluster {
         this.ultimoMensajeRecibido = System.currentTimeMillis();
     }
     public long getUltimoMensajeRecibido() { return ultimoMensajeRecibido; }
+
+    public synchronized void limpiarPeersExceptoPropio() {
+        peers.clear();
+        String host = todosLosPeers.get(idPropio);
+        if (host != null) {
+            peers.put(idPropio, host);
+        }
+    }
 }

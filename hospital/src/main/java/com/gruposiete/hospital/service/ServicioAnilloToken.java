@@ -35,6 +35,7 @@ public class ServicioAnilloToken {
     private volatile long timestampTokenRecibido = 0;
     private volatile long timestampFrozen = 0;
     private volatile long ultimoLogToken = 0;
+    private volatile long ultimoAvisoDeToken = System.currentTimeMillis();
 
     public ServicioAnilloToken(EstadoCluster estadoCluster, @Lazy GestionLogs gestionLogs) {
         this.estadoCluster = estadoCluster;
@@ -135,13 +136,19 @@ public class ServicioAnilloToken {
                             try { gestionLogs.registrar("Coordinador " + miId + " removio nodo " + destino + " del anillo, token a " + nuevoDestino); }
                             catch (Exception e) { log.warn("No se pudo persistir log: {}", e.getMessage()); }
                             return;
+                        } else {
+                            log.warn("Fallo pasando token a nuevo sucesor {}. Reintentando...", nuevoDestino);
+                            manejarFalloToken(nuevoDestino);
+                            return;
                         }
                     } catch (Exception e) {
                         log.error("Error pasando token a nuevo sucesor {}: {}", nuevoDestino, e.getMessage());
+                        manejarFalloToken(nuevoDestino);
+                        return;
                     }
                 }
             }
-            log.warn("Coordinador no pudo pasar token a nadie, reteniendo");
+            log.warn("Coordinador no pudo pasar token a nadie (solo quedo yo o no hay mas nodos), reteniendo");
             return;
         }
 
@@ -183,6 +190,22 @@ public class ServicioAnilloToken {
         if (diff > 3000) {
             timestampTokenRecibido = 0;
         }
+
+        // Regeneracion de token por el coordinador si se pierde por completo
+        if (estadoCluster.getCoordinadorActual() == estadoCluster.getIdPropio()) {
+            long silencioGlobal = System.currentTimeMillis() - ultimoAvisoDeToken;
+            if (silencioGlobal > 15000 && !estadoCluster.tieneToken()) {
+                log.warn("Coordinador detecta que el token se perdio ({}ms de silencio). Regenerando token...", silencioGlobal);
+                estadoCluster.darToken();
+                ultimoAvisoDeToken = System.currentTimeMillis();
+                try {
+                    gestionLogs.registrar("Coordinador " + estadoCluster.getIdPropio() + " regenera token tras 15s de perdida");
+                } catch (Exception e) {
+                    log.warn("No se pudo persistir log: {}", e.getMessage());
+                }
+            }
+        }
+
         if (timestampFrozen > 0 && System.currentTimeMillis() - timestampFrozen > 3000) {
             log.warn("Timeout frozen, reenviando TOKEN_LOST al coordinador actual");
             int coord = estadoCluster.getCoordinadorActual();
@@ -206,6 +229,7 @@ public class ServicioAnilloToken {
         estadoCluster.darToken();
         estadoCluster.limpiarNodoCongeladoReportante();
         timestampTokenRecibido = System.currentTimeMillis();
+        ultimoAvisoDeToken = System.currentTimeMillis();
         timestampFrozen = 0;
         log.debug("Token recibido de nodo {}", msg.getOrigen());
         MensajeCluster ack = new MensajeCluster(
@@ -239,9 +263,12 @@ public class ServicioAnilloToken {
                 estadoCluster.limpiarNodoCongeladoReportante();
                 timestampFrozen = 0;
                 log.debug("Token reenviado a nodo {}", destino);
+            } else {
+                manejarFalloToken(destino);
             }
         } catch (Exception e) {
             log.error("Error en reintento de token a {}: {}", destino, e.getMessage());
+            manejarFalloToken(destino);
         }
     }
 
@@ -260,9 +287,12 @@ public class ServicioAnilloToken {
                 estadoCluster.limpiarNodoCongeladoReportante();
                 timestampFrozen = 0;
                 log.debug("Token reenviado a nuevo nodo {}", nuevoDestino);
+            } else {
+                manejarFalloToken(nuevoDestino);
             }
         } catch (Exception e) {
             log.error("Error en reenvio de token a {}: {}", nuevoDestino, e.getMessage());
+            manejarFalloToken(nuevoDestino);
         }
     }
 
