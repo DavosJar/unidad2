@@ -195,16 +195,20 @@ public class ServicioEleccionBully {
     private synchronized void iniciarEleccion() {
         int idPropio = estadoCluster.getIdPropio();
         int coordViejo = estadoCluster.getCoordinadorActual();
+        
+        // NO remover aquí — solo desmarcar como coordinador
+        // El nodo puede estar vivo pero con latencia alta
+        estadoCluster.marcarCoordinador(-1);
+        estadoCluster.setEstado(EstadoNodo.EN_ELECCION);
+        
         if (coordViejo != -1 && coordViejo != idPropio) {
-            estadoCluster.removerNodo(coordViejo);
             try {
-                gestionLogs.registrar("Nodo " + idPropio + " detecto caida de coordinador " + coordViejo + ", inicia eleccion");
+                gestionLogs.registrar("Nodo " + idPropio + " detecto posible caida de coordinador " 
+                    + coordViejo + ", inicia eleccion");
             } catch (Exception e) {
                 log.warn("No se pudo persistir log: {}", e.getMessage());
             }
         }
-        estadoCluster.marcarCoordinador(-1);
-        estadoCluster.setEstado(EstadoNodo.EN_ELECCION);
         List<Integer> mayores = estadoCluster.nodosConIdMayor(idPropio);
         if (mayores.isEmpty()) {
             proclamarseCoordinador();
@@ -234,13 +238,33 @@ public class ServicioEleccionBully {
         estadoCluster.marcarCoordinador(idPropio);
         List<Integer> vivos = new ArrayList<>(estadoCluster.getPeers().keySet());
         Collections.sort(vivos);
-        StringBuilder ordenPayload = new StringBuilder("orden_anillo=");
-        for (int i = 0; i < vivos.size(); i++) {
-            if (i > 0) ordenPayload.append(",");
-            ordenPayload.append(vivos.get(i));
+        
+        // Verificar cuáles peers realmente responden antes de armar el anillo
+        List<Integer> confirmadosVivos = new ArrayList<>();
+        confirmadosVivos.add(idPropio);
+        for (int id : vivos) {
+            if (id == idPropio) continue;
+            String host = estadoCluster.getPeers().get(id);
+            if (host == null) continue;
+            MensajeCluster probe = new MensajeCluster(TipoMensaje.HEARTBEAT, idPropio, id, "");
+            MensajeCluster.RespuestaEnvio res = MensajeCluster.enviar(probe, host, clusterPort, 800, 1);
+            if (res.fueExitoso()) {
+                confirmadosVivos.add(id);
+            } else {
+                // Solo remover si no responde en el momento de proclamarse
+                estadoCluster.removerNodo(id);
+                log.info("Nodo {} removido del anillo por no responder al proclamarse coordinador", id);
+            }
         }
-        estadoCluster.configurarAnillo(vivos);
-        for (int idDest : vivos) {
+        
+        Collections.sort(confirmadosVivos);
+        StringBuilder ordenPayload = new StringBuilder("orden_anillo=");
+        for (int i = 0; i < confirmadosVivos.size(); i++) {
+            if (i > 0) ordenPayload.append(",");
+            ordenPayload.append(confirmadosVivos.get(i));
+        }
+        estadoCluster.configurarAnillo(confirmadosVivos);
+        for (int idDest : confirmadosVivos) {
             if (idDest == idPropio) continue;
             String host = estadoCluster.getPeers().get(idDest);
             if (host == null) continue;
@@ -256,7 +280,7 @@ public class ServicioEleccionBully {
         if (congelado != null) {
             String host = estadoCluster.getPeers().get(congelado);
             if (host != null) {
-                int nuevoSiguiente = calcularSiguiente(vivos, congelado);
+                int nuevoSiguiente = calcularSiguiente(confirmadosVivos, congelado);
                 try {
                     MensajeCluster msg = new MensajeCluster(
                         TipoMensaje.TOKEN_RESEND, idPropio, congelado,
