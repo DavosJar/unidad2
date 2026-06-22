@@ -184,12 +184,7 @@ public class ServicioAnilloToken {
 
     private void verificarTimeoutToken() {
         if (!estadoCluster.estaInicializado()) return;
-        if (timestampTokenRecibido == 0) return;
         if (estadoCluster.tieneToken()) return;
-        long diff = System.currentTimeMillis() - timestampTokenRecibido;
-        if (diff > 3000) {
-            timestampTokenRecibido = 0;
-        }
 
         // Regeneracion de token por el coordinador si se pierde por completo
         if (estadoCluster.getCoordinadorActual() == estadoCluster.getIdPropio()) {
@@ -203,8 +198,17 @@ public class ServicioAnilloToken {
                 } catch (Exception e) {
                     log.warn("No se pudo persistir log: {}", e.getMessage());
                 }
+                return; // Token regenerated, no need to do anything else this cycle
             }
         }
+
+        if (timestampTokenRecibido == 0) return;
+        
+        long diff = System.currentTimeMillis() - timestampTokenRecibido;
+        if (diff > 3000) {
+            timestampTokenRecibido = 0;
+        }
+
 
         if (timestampFrozen > 0 && System.currentTimeMillis() - timestampFrozen > 3000) {
             log.warn("Timeout frozen, reenviando TOKEN_LOST al coordinador actual");
