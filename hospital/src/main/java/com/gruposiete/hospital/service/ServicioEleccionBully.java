@@ -536,6 +536,7 @@ public class ServicioEleccionBully {
                 List<Integer> orden = parsearOrden(payload.substring("orden_anillo=".length()));
                 if (!orden.isEmpty()) {
                     estadoCluster.configurarAnillo(orden);
+                    estadoCluster.sincronizarPeers(orden);
                 }
             }
             try {
@@ -555,6 +556,7 @@ public class ServicioEleccionBully {
             List<Integer> orden = parsearOrden(payload.substring("orden_anillo=".length()));
             if (!orden.isEmpty()) {
                 estadoCluster.configurarAnillo(orden);
+                estadoCluster.sincronizarPeers(orden);
                 log.info("Nodo {} actualiza anillo: {}", estadoCluster.getIdPropio(), orden);
             }
         }

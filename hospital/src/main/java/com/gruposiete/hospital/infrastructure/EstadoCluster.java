@@ -78,6 +78,26 @@ public class EstadoCluster {
         }
     }
 
+    /**
+     * Sincroniza el mapa de peers vivos con la lista de nodos del anillo.
+     * Remueve del mapa peers cualquier nodo que NO esté en la lista recibida,
+     * y agrega cualquier nodo que SÍ esté en la lista pero no en peers.
+     */
+    public synchronized void sincronizarPeers(List<Integer> nodosVivos) {
+        if (nodosVivos == null || nodosVivos.isEmpty()) return;
+        // Remover peers que no están en la lista
+        peers.keySet().removeIf(id -> !nodosVivos.contains(id));
+        // Agregar nodos que están en la lista pero no en peers
+        for (int id : nodosVivos) {
+            if (!peers.containsKey(id)) {
+                String host = todosLosPeers.get(id);
+                if (host != null) {
+                    peers.put(id, host);
+                }
+            }
+        }
+    }
+
     public synchronized boolean tieneToken() { return tieneToken; }
     public synchronized boolean isTokenEnUso() { return tokenEnUso; }
     public synchronized void setTokenEnUso(boolean enUso) { this.tokenEnUso = enUso; }
