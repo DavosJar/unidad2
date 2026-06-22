@@ -63,16 +63,19 @@ export function useClusterSocket() {
 
       onDisconnect: () => {
         setConnected(false);
+        setClusterState(null);
       },
 
       onStompError: (frame) => {
         setError('Error STOMP: ' + (frame.headers?.message || 'desconocido'));
         setConnected(false);
+        setClusterState(null);
       },
 
       onWebSocketError: (evt) => {
         setError('WebSocket no disponible — ¿el backend está corriendo?');
         setConnected(false);
+        setClusterState(null);
       },
     });
 

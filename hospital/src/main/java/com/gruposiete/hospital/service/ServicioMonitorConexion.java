@@ -49,7 +49,7 @@ public class ServicioMonitorConexion {
     @PostConstruct
     public void iniciar() {
         scheduler = Executors.newSingleThreadScheduledExecutor();
-        scheduler.scheduleAtFixedRate(this::verificarEstado, 5000, 5000, TimeUnit.MILLISECONDS);
+        scheduler.scheduleAtFixedRate(this::verificarEstado, 1000, 1000, TimeUnit.MILLISECONDS);
     }
 
     @PreDestroy
@@ -90,7 +90,7 @@ public class ServicioMonitorConexion {
         boolean soyCandidato = (idPropio == coord || coord == -1);
         long diffSilencio = System.currentTimeMillis() - estadoCluster.getUltimoMensajeRecibido();
 
-        if (diffSilencio > 10000 && soyCandidato) {
+        if (diffSilencio > 3000 && soyCandidato) {
             log.debug("Nodo {} sin mensajes por {}ms, verificando conectividad...", idPropio, diffSilencio);
             if (!pingRouter()) {
                 log.warn("Nodo {} no puede alcanzar el router -> DESCONECTADO", idPropio);
